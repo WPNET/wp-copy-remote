@@ -37,19 +37,17 @@ chmod +x wp-cli.phar && sudo mv wp-cli.phar /usr/local/bin/wp
 ```bash
 sudo git clone https://github.com/WPNET/wp-copy-remote.git /opt/wp-copy-remote
 cd /opt/wp-copy-remote
-sudo chmod +x wp-push-remote.sh wp-pull-remote.sh
+sudo chmod +x wp-push-remote.sh wp-pull-remote.sh install.sh
 ```
 
-Install to a site user's directory (run as root):
+Install a script to a site user's directory (run as root):
 
 ```bash
-# Install push script
-sudo /opt/wp-push-remote/wp-push-remote.sh --install-for-user
-# Script installed as /sites/{domain}/.local/bin/wp-push-remote
-
-# Install pull script
-sudo /opt/wp-pull-remote/wp-pull-remote.sh --install-for-user
-# Script installed as /sites/{domain}/.local/bin/wp-pull-remote
+sudo /opt/wp-copy-remote/install.sh
+# Interactive prompts will ask:
+#   1. Push or pull script?
+#   2. Which site? (lists /sites/*/files/ directories)
+# Script installed as ~/.local/bin/wp-push-remote (or wp-pull-remote)
 ```
 
 **Important:** Run as the site user, never as root.
@@ -83,7 +81,6 @@ Both scripts use the same options and flags. Configuration is stored separately:
 ```
 -h, --help                   Show help message
 -u, --unattended             Run without prompts
--i, --install-for-user       Install script to a site user directory
 -c, --config                 Configure and save settings
 -D, --del-ssh-key            Delete SSH key pairs for remote user
 -f, --filter-sql             Strip privileged SQL statements before import
