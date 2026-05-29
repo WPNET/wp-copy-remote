@@ -841,6 +841,13 @@ remote_path="${remote_path_prefix}${remote_webroot}"
 source_db_name="${db_export_prefix}${rnd_str}${rnd_str_key}.sql"
 current_user=$(whoami)
 
+# Auto-detect local webroot: if wp-config.php not found at configured path, try files/public
+if [[ ! -f "${source_path}/wp-config.php" && -f "${source_path_prefix}files/public/wp-config.php" ]]; then
+    source_webroot="files/public"
+    source_path="${source_path_prefix}${source_webroot}"
+    print_info "Auto-detected local webroot: ${source_path}"
+fi
+
 # Auto-assign paths for search-replace if not already set
 if [[ -z "$wp_search_replace_source_path" ]]; then
     wp_search_replace_source_path="$source_path"
@@ -966,6 +973,18 @@ if [[ $unattended_mode -eq 0 ]]; then
 else
     print_info "Skipping SSH connection test in unattended mode."
 fi
+
+# Auto-detect remote webroot: if wp-config.php not found at configured path, try files/public
+_remote_wp_check=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} \
+    "test -f '${remote_path}/wp-config.php' && echo 'found' || (test -f '${remote_path_prefix}files/public/wp-config.php' && echo 'public' || echo 'notfound')" 2>/dev/null || echo "")
+if [[ "$_remote_wp_check" == "public" ]]; then
+    _old_remote_path="$remote_path"
+    remote_webroot="files/public"
+    remote_path="${remote_path_prefix}${remote_webroot}"
+    [[ "$wp_search_replace_remote_path" == "$_old_remote_path" ]] && wp_search_replace_remote_path="$remote_path"
+    print_info "Auto-detected remote webroot: ${remote_path}"
+fi
+unset _remote_wp_check _old_remote_path
 
 if ( ! user_prompt "Proceed with the site PULL?"); then
     print_error "ABORTED!"
