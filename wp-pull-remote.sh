@@ -1304,4 +1304,4 @@ print_info "To delete SSH key pairs later, run with --del-ssh-key"
 echo -e "\n${COLOR_BOLD_GREEN}========================================${COLOR_RESET}"
 echo -e "${COLOR_BOLD_GREEN}    Pull operation completed!${COLOR_RESET}"
 echo -e "${COLOR_BOLD_GREEN}========================================${COLOR_RESET}\n"
-exit
+exit 0
