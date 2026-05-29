@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="1.0.0"
+script_version="1.1.0"
 # Author:       gb@wpnet.nz
 # Description:  Pull a site from REMOTE server to LOCAL (SOURCE). Run this script from the LOCAL server.
 # Requirements: WP-CLI installed on source (local) and remote servers
@@ -78,8 +78,67 @@ print_error() {
     echo -e "${COLOR_RED}[ERROR]${COLOR_RESET} $1"
 }
 
+_step_count=0
 print_step() {
-    echo -e "\n${COLOR_BOLD_BLUE}++++ $1${COLOR_RESET}"
+    _step_count=$((_step_count + 1))
+    echo -e "\n${COLOR_BOLD_BLUE}++++ Step ${_step_count}: $1${COLOR_RESET}"
+}
+
+# Display boolean flag as human-readable YES/NO
+bool_display() {
+    [[ "${1:-0}" -eq 1 ]] && echo "YES" || echo "NO"
+}
+
+# Execute a command, or in dry-run mode just print it
+dry_run_exec() {
+    if [[ $dry_run -eq 1 ]]; then
+        print_info "[DRY-RUN] Would execute: $*"
+        return 0
+    fi
+    "$@"
+}
+
+# Acquire a lock file to prevent concurrent runs
+_lock_file="/tmp/$(basename "$0" .sh).lock"
+acquire_lock() {
+    if [[ -f "$_lock_file" ]]; then
+        local old_pid
+        old_pid=$(cat "$_lock_file" 2>/dev/null)
+        if [[ -n "$old_pid" ]] && kill -0 "$old_pid" 2>/dev/null; then
+            print_error "Another instance is already running (PID: ${old_pid}). Remove ${_lock_file} to override."
+            exit 1
+        fi
+        print_warning "Removing stale lock file (PID ${old_pid} is no longer running)"
+        rm -f "$_lock_file"
+    fi
+    echo $$ > "$_lock_file"
+}
+release_lock() {
+    rm -f "$_lock_file"
+}
+
+# Check available disk space before a large transfer
+# Args: $1 = destination path, $2 = source path to measure
+check_disk_space() {
+    local dest_path="$1"
+    local src_path="$2"
+    local avail_kb src_kb
+
+    avail_kb=$(df -k "$dest_path" 2>/dev/null | awk 'NR==2 {print $4}')
+    src_kb=$(du -sk "$src_path" 2>/dev/null | awk '{print $1}')
+
+    if [[ -n "$avail_kb" && -n "$src_kb" ]]; then
+        local avail_mb=$(( avail_kb / 1024 ))
+        local src_mb=$(( src_kb / 1024 ))
+        print_info "Disk space: source ~${src_mb}MB, destination has ~${avail_mb}MB free"
+        local threshold=$(( src_kb + src_kb / 5 ))  # 120% of source size
+        if (( avail_kb < threshold )); then
+            print_warning "Destination may not have sufficient disk space!"
+            print_warning "  Available: ~${avail_mb}MB  |  Estimated needed: ~$(( threshold / 1024 ))MB (including 20% buffer)"
+            return 1
+        fi
+    fi
+    return 0
 }
 
 # Help function
@@ -114,6 +173,10 @@ show_help() {
     echo -e "    ${COLOR_YELLOW}--no-exclude-wpconfig${COLOR_RESET}        Include wp-config.php in sync"
     echo -e "    ${COLOR_YELLOW}--disable-wp-debug${COLOR_RESET}           Disable WP_DEBUG temporarily on local (default: no)"
     echo -e "    ${COLOR_YELLOW}--all-tables-with-prefix${COLOR_RESET}     Use --all-tables-with-prefix for wp search-replace (default: no)"
+    echo -e "    ${COLOR_YELLOW}-n, --dry-run${COLOR_RESET}                Simulate the operation without making destructive changes"
+    echo -e "    ${COLOR_YELLOW}--backup-db${COLOR_RESET}                  Backup the destination DB before importing (timestamped .sql file)"
+    echo -e "    ${COLOR_YELLOW}--log${COLOR_RESET} FILE                   Write all output to FILE in addition to terminal"
+    echo -e "    ${COLOR_YELLOW}-v, --version${COLOR_RESET}                Show version and exit"
     echo ""
     echo -e "${COLOR_BOLD_GREEN}EXAMPLES:${COLOR_RESET}"
     echo "    # Run with interactive prompts for configuration"
@@ -187,6 +250,9 @@ delete_ssh_keys=0      # flag to delete SSH key pairs
 all_tables_with_prefix=0  # use --all-tables-with-prefix option for wp search-replace commands
 install_for_user=0     # flag to install script for a user
 filter_sql=0           # filter SQL dump to remove privileged statements (can add processing time)
+dry_run=0              # dry-run mode: show what would happen without executing destructive steps
+backup_db=0            # backup existing destination DB before importing (creates timestamped .sql file)
+log_file=""            # optional path to write a copy of all output
 
 # Load saved configuration if it exists
 load_config() {
@@ -478,11 +544,18 @@ cleanup_on_exit() {
                 rm -f "${source_path}/${db_export_prefix}"*"${rnd_str_key}.sql"
             fi
         fi
+        # Clean up database export from remote server if it was created
+        if [[ -n "${ssh_key_path}" ]] && [[ -n "${remote_user}" ]] && [[ -n "${remote_ip_address}" ]] && \
+           [[ -n "${remote_path}" ]] && [[ -n "${db_export_prefix}" ]] && [[ -n "${rnd_str_key}" ]]; then
+            print_info "Attempting to clean up database export from remote server..."
+            ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS:-} ${remote_user}@${remote_ip_address} \
+                "rm -f ${remote_path}/${db_export_prefix}*${rnd_str_key}.sql" 2>/dev/null || true
+        fi
     fi
 }
 
 # Set trap for cleanup
-trap cleanup_on_exit EXIT INT TERM
+trap 'release_lock; cleanup_on_exit' EXIT INT TERM
 
 # Validate configuration
 validate_config() {
@@ -662,7 +735,7 @@ function prompt_for_config() {
 ####################################################################################
 
 # Parse long options
-TEMP=$(getopt -o huicDfe:r:p: --long help,unattended,install-for-user,config,del-ssh-key,filter-sql,exclude:,search-replace,no-search-replace,files-only,no-db-import,install-plugins:,remote-cmds:,exclude-wpconfig,no-exclude-wpconfig,disable-wp-debug,all-tables-with-prefix -n "$0" -- "$@" 2>/dev/null)
+TEMP=$(getopt -o huicDfe:r:p:nv --long help,unattended,install-for-user,config,del-ssh-key,filter-sql,exclude:,search-replace,no-search-replace,files-only,no-db-import,install-plugins:,remote-cmds:,exclude-wpconfig,no-exclude-wpconfig,disable-wp-debug,all-tables-with-prefix,dry-run,backup-db,log:,version -n "$0" -- "$@" 2>/dev/null)
 
 # Check for getopt errors
 if [[ $? -ne 0 ]]; then
@@ -751,6 +824,26 @@ if [[ $? -ne 0 ]]; then
                 all_tables_with_prefix=1
                 shift
                 ;;
+            -n|--dry-run)
+                dry_run=1
+                shift
+                ;;
+            --backup-db)
+                backup_db=1
+                shift
+                ;;
+            --log)
+                if [[ -z "$2" ]]; then
+                    print_error "--log requires a file path"
+                    exit 1
+                fi
+                log_file="$2"
+                shift 2
+                ;;
+            -v|--version)
+                echo "$(basename "$0") v${script_version}"
+                exit 0
+                ;;
             *)
                 print_error "Unknown option: $1"
                 echo "Use -h or --help for usage information"
@@ -833,6 +926,22 @@ else
                 all_tables_with_prefix=1
                 shift
                 ;;
+            -n|--dry-run)
+                dry_run=1
+                shift
+                ;;
+            --backup-db)
+                backup_db=1
+                shift
+                ;;
+            --log)
+                log_file="$2"
+                shift 2
+                ;;
+            -v|--version)
+                echo "$(basename "$0") v${script_version}"
+                exit 0
+                ;;
             --)
                 shift
                 break
@@ -865,6 +974,18 @@ fi
 if [[ $prompt_config -eq 1 ]]; then
     prompt_for_config
 fi
+
+# Set up log file tee if specified
+if [[ -n "$log_file" ]]; then
+    exec > >(tee -a "$log_file") 2>&1
+    print_info "Logging output to: $log_file"
+fi
+
+# Acquire process lock to prevent concurrent runs
+acquire_lock
+
+# SSH options applied to all SSH/rsync connections
+SSH_OPTS="-o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new -o BatchMode=yes"
 
 # Handle SSH key deletion if requested
 if [[ $delete_ssh_keys -eq 1 ]]; then
@@ -946,13 +1067,23 @@ fi
 
 # Display option flags
 print_info "Configuration Flags:"
-echo -e "  ${COLOR_CYAN}do_search_replace:${COLOR_RESET} ${do_search_replace}"
-echo -e "  ${COLOR_CYAN}files_only:${COLOR_RESET} ${files_only}"
-echo -e "  ${COLOR_CYAN}no_db_import:${COLOR_RESET} ${no_db_import}"
-echo -e "  ${COLOR_CYAN}exclude_wpconfig:${COLOR_RESET} ${exclude_wpconfig}"
-echo -e "  ${COLOR_CYAN}disable_wp_debug:${COLOR_RESET} ${disable_wp_debug}"
-echo -e "  ${COLOR_CYAN}all_tables_with_prefix:${COLOR_RESET} ${all_tables_with_prefix}"
-echo -e "  ${COLOR_CYAN}filter_sql:${COLOR_RESET} ${filter_sql}"
+echo -e "  ${COLOR_CYAN}do_search_replace:${COLOR_RESET} $(bool_display $do_search_replace)"
+echo -e "  ${COLOR_CYAN}files_only:${COLOR_RESET} $(bool_display $files_only)"
+echo -e "  ${COLOR_CYAN}no_db_import:${COLOR_RESET} $(bool_display $no_db_import)"
+echo -e "  ${COLOR_CYAN}exclude_wpconfig:${COLOR_RESET} $(bool_display $exclude_wpconfig)"
+echo -e "  ${COLOR_CYAN}disable_wp_debug:${COLOR_RESET} $(bool_display $disable_wp_debug)"
+echo -e "  ${COLOR_CYAN}all_tables_with_prefix:${COLOR_RESET} $(bool_display $all_tables_with_prefix)"
+echo -e "  ${COLOR_CYAN}filter_sql:${COLOR_RESET} $(bool_display $filter_sql)"
+echo -e "  ${COLOR_CYAN}dry_run:${COLOR_RESET} $(bool_display $dry_run)"
+echo -e "  ${COLOR_CYAN}backup_db:${COLOR_RESET} $(bool_display $backup_db)"
+
+if (( dry_run == 1 )); then
+    echo ""
+    echo -e "${COLOR_BOLD_YELLOW}╔══════════════════════════════════════════╗${COLOR_RESET}"
+    echo -e "${COLOR_BOLD_YELLOW}║  DRY-RUN MODE: No changes will be made  ║${COLOR_RESET}"
+    echo -e "${COLOR_BOLD_YELLOW}╚══════════════════════════════════════════╝${COLOR_RESET}"
+    echo ""
+fi
 
 if (( filter_sql == 1 )); then
     print_warning "SQL filtering is ENABLED (-f/--filter-sql). Import step may take longer."
@@ -1000,21 +1131,20 @@ if [[ -z "$ssh_key_path" ]]; then
 fi
 
 if [[ $unattended_mode -eq 0 ]]; then
-    if ( user_prompt_default_no "Test the connection to the remote server?" ); then
-        print_step "Testing the connection: ssh ${remote_user}@${remote_ip_address}"
-        print_info "If you get a password prompt, then the key is not set up correctly."
-        sleep 1
-        ssh -q -t -i "${ssh_key_path}" ${remote_user}@${remote_ip_address} << EOF
-shopt -s dotglob
-echo -e "\n${COLOR_BOLD_GREEN}SUCCESS! Connected to REMOTE: \$(whoami)@\$(hostname) (\$(hostname -I))${COLOR_RESET}"
-echo -e "Returning to the local server ..."
-sleep 1
-EOF
+    print_step "Testing SSH connection to ${remote_user}@${remote_ip_address} ..."
+    print_info "If this hangs, check SSH key setup. Timeout: 15s"
+    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "echo 'SSH OK'" >/dev/null 2>&1; then
+        print_success "SSH connection verified"
     else
-        print_warning "Connection NOT tested!"
+        print_error "SSH connection failed to ${remote_user}@${remote_ip_address}"
+        print_info "Check: key at ${ssh_key_path}, remote authorized_keys for user '${remote_user}'"
+        if ! ( user_prompt "SSH test failed - proceed anyway?" ); then
+            print_error "ABORTED!"
+            exit 1
+        fi
     fi
 else
-    print_info "Skipping connection test in unattended mode."
+    print_info "Skipping SSH connection test in unattended mode."
 fi
 
 if ( ! user_prompt "Proceed with the site PULL?"); then
@@ -1031,10 +1161,14 @@ print_header "STARTING PULL OPERATION"
 # Record start time
 start_time=$(date +%s)
 
-if (( files_only == 0 )); then
+if (( files_only == 0 && dry_run == 1 )); then
+    print_info "[DRY-RUN] Would export remote database at ${remote_path}/${source_db_name}"
+fi
+
+if (( files_only == 0 && dry_run == 0 )); then
     # Export database on REMOTE server
     print_step "EXPORTING database on REMOTE (${remote_ip_address}) ..."
-    if ssh -q -T -i "${ssh_key_path}" ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
+    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
         print_success "Database exported on remote successfully"
     else
         print_error "Failed to export database on remote"
@@ -1042,11 +1176,18 @@ if (( files_only == 0 )); then
     fi
 fi
 
+# Check local disk space before pulling
+if [[ $dry_run -eq 0 ]]; then
+    check_disk_space "$(dirname "${source_path}")" "${source_path}" || print_warning "Continuing despite disk space warning..."
+fi
+
 # Pull files from remote to local
 print_step "RSYNC-ing files FROM REMOTE to LOCAL ..."
 
 # run rsync with exclusions (direction reversed: remote -> local)
-if rsync -e "ssh -i \"${ssh_key_path}\"" -azhP --delete $(printf -- "--exclude=%q " "${excludes[@]}") ${remote_user}@${remote_ip_address}:${remote_path}/ ${source_path}/; then
+rsync_dry_flag=""
+(( dry_run == 1 )) && rsync_dry_flag="--dry-run"
+if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${remote_user}@${remote_ip_address}:${remote_path}/ ${source_path}/; then
     print_success "Files synced successfully"
 else
     print_error "Rsync failed"
@@ -1058,7 +1199,7 @@ fi
 if (( do_search_replace == 1 && files_only == 0 && no_db_import == 0 )); then
     if [[ -z "${wp_search_replace_remote_url}" ]]; then
         print_info "Detecting remote site URL for search-replace..."
-        wp_search_replace_remote_url=$(ssh -q -T -i "${ssh_key_path}" ${remote_user}@${remote_ip_address} "wp option get siteurl --path='${remote_path}' 2>/dev/null" | tr -d '\n')
+        wp_search_replace_remote_url=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp option get siteurl --path='${remote_path}' 2>/dev/null" | tr -d '\n')
         if [[ -n "$wp_search_replace_remote_url" ]]; then
             print_info "Remote URL detected: ${wp_search_replace_remote_url}"
         else
@@ -1073,7 +1214,7 @@ if (( files_only == 0 && no_db_import == 0 )); then
     print_step "Checking table prefix compatibility ..."
     
     # Get remote table prefix (source of data being imported)
-    remote_table_prefix=$(ssh -q -T -i "${ssh_key_path}" ${remote_user}@${remote_ip_address} "wp db prefix --path='${remote_path}' 2>/dev/null" | tr -d '\n')
+    remote_table_prefix=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db prefix --path='${remote_path}' 2>/dev/null" | tr -d '\n')
     if [[ -z "$remote_table_prefix" ]]; then
         print_warning "Unable to detect remote table prefix"
     else
@@ -1210,6 +1351,18 @@ if (( files_only == 0 && no_db_import == 0 )); then
         fi
     fi
 
+    if (( backup_db == 1 && dry_run == 0 )); then
+        local_backup="${source_path}/wp-db-backup-$(date +%Y%m%d-%H%M%S).sql"
+        print_step "BACKING UP existing local database before import ..."
+        if wp db export "${local_backup}" --path="${source_path}"; then
+            print_success "Local DB backed up to: ${local_backup}"
+        else
+            print_warning "Local DB backup failed - continuing anyway"
+        fi
+    elif (( backup_db == 1 && dry_run == 1 )); then
+        print_info "[DRY-RUN] Would backup local database before import"
+    fi
+
     echo -e "\n${COLOR_BLUE}IMPORTING database locally ...${COLOR_RESET}"
     if wp db import ${source_path}/${source_db_name} --path="${source_path}"; then
         echo -e "${COLOR_GREEN}Database imported successfully${COLOR_RESET}"
@@ -1287,9 +1440,9 @@ if (( disable_wp_debug == 1 )); then
 fi
 
 # Cleanup: delete the database export file from the remote server
-if (( files_only == 0 )); then
+if (( files_only == 0 && dry_run == 0 )); then
     print_step "DELETING database backup from remote server ..."
-    ssh -q -T -i "${ssh_key_path}" ${remote_user}@${remote_ip_address} "rm -f ${remote_path}/${db_export_prefix}*${rnd_str_key}.sql" && print_success "Remote database backup deleted"
+    ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "rm -f ${remote_path}/${db_export_prefix}*${rnd_str_key}.sql" && print_success "Remote database backup deleted"
 fi
 
 # Calculate execution time

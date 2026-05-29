@@ -1,4 +1,6 @@
-# WP Push/Pull Remote
+# WP Copy Remote
+
+> **Note:** This repository was formerly named `wp-push-remote`. The GitHub repository itself can be renamed to `wp-copy-remote` in **Settings → General → Repository name**.
 
 Bash scripts to push or pull WordPress sites between servers using WP-CLI and rsync. Works on Ubuntu 22.04 LTS and higher.
 
@@ -33,8 +35,8 @@ chmod +x wp-cli.phar && sudo mv wp-cli.phar /usr/local/bin/wp
 ## Installation
 
 ```bash
-sudo git clone https://github.com/WPNET/wp-push-remote.git /opt/wp-push-remote
-cd /opt/wp-push-remote
+sudo git clone https://github.com/WPNET/wp-copy-remote.git /opt/wp-copy-remote
+cd /opt/wp-copy-remote
 sudo chmod +x wp-push-remote.sh wp-pull-remote.sh
 ```
 
