@@ -975,6 +975,9 @@ if [[ "$_remote_wp_check" == "public" ]]; then
     _old_remote_path="$remote_path"
     remote_webroot="files/public"
     remote_path="${remote_path_prefix}${remote_webroot}"
+    # Only update wp_search_replace_remote_path if it was auto-assigned from remote_path
+    # (i.e. the user did not set a custom value). Strict equality is safe here because
+    # normalize_paths() has already stripped any leading/trailing slashes.
     [[ "$wp_search_replace_remote_path" == "$_old_remote_path" ]] && wp_search_replace_remote_path="$remote_path"
     print_info "Auto-detected remote webroot: ${remote_path}"
 fi
