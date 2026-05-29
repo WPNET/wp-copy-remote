@@ -207,16 +207,14 @@ if ! id "$site_owner" >/dev/null 2>&1; then
 fi
 
 site_owner_home="$(getent passwd "$site_owner" | cut -d: -f6)"
-if [[ -z "$site_owner_home" ]]; then
-    print_error "Could not determine home directory for user '${site_owner}'."
-    exit 1
-fi
 
-bin_dir="${site_owner_home}/.local/bin"
+bin_dir="${selected_site}/.local/bin"
 install_path="${bin_dir}/${script_name}"
 
 print_info "Site user  : ${site_owner}"
-print_info "Home dir   : ${site_owner_home}"
+if [[ -n "$site_owner_home" ]]; then
+    print_info "Home dir   : ${site_owner_home}"
+fi
 print_info "Install to : ${install_path}"
 
 # ── Step 4: Confirm ───────────────────────────────────────────────────────────
@@ -234,7 +232,7 @@ esac
 
 # ── Step 5: Create directory and copy script ──────────────────────────────────
 
-print_step "Step 4: Installing script"
+print_step "Step 5: Installing script"
 
 if [[ ! -d "$bin_dir" ]]; then
     print_info "Creating directory: ${bin_dir}"
@@ -252,7 +250,7 @@ print_success "Script copied to ${install_path}"
 
 # ── Step 6: Set ownership and permissions ────────────────────────────────────
 
-print_step "Step 5: Setting ownership and permissions"
+print_step "Step 6: Setting ownership and permissions"
 
 if chown -R "${site_owner}:${site_owner}" "$bin_dir"; then
     print_success "Ownership set to ${site_owner}:${site_owner} on ${bin_dir}"
