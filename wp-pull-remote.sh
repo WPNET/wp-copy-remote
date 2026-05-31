@@ -10,10 +10,10 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="2.3.0"
+script_version="1.1.0"
 # Author:       gb@wpnet.nz
-# Description:  Push a site from SOURCE server to REMOTE. Run this script from the SOURCE server.
-# Requirements: WP-CLI installed on source and remote
+# Description:  Pull a site from REMOTE server to LOCAL (SOURCE). Run this script from the LOCAL server.
+# Requirements: WP-CLI installed on source (local) and remote servers
 #               wp-cli.yml to be configured in the source and remote site owner's home directory, with the correct path to the WP installation
 # Target OS:    Ubuntu 22.04 LTS or higher
 
@@ -143,8 +143,8 @@ check_disk_space() {
 
 # Help function
 show_help() {
-    echo -e "${COLOR_BOLD_CYAN}WP Push Remote v${script_version}${COLOR_RESET}"
-    echo -e "${COLOR_WHITE}Push a WordPress site from SOURCE server to REMOTE using WP-CLI and rsync${COLOR_RESET}"
+    echo -e "${COLOR_BOLD_CYAN}WP Pull Remote v${script_version}${COLOR_RESET}"
+    echo -e "${COLOR_WHITE}Pull a WordPress site FROM REMOTE server to LOCAL using WP-CLI and rsync${COLOR_RESET}"
     echo ""
     echo -e "${COLOR_BOLD_GREEN}USAGE:${COLOR_RESET}"
     echo "    $0 [OPTIONS]"
@@ -153,24 +153,24 @@ show_help() {
     echo -e "    ${COLOR_YELLOW}-h, --help${COLOR_RESET}                   Show this help message"
     echo -e "    ${COLOR_YELLOW}-u, --unattended${COLOR_RESET}             Run in unattended mode (no prompts)"
     echo -e "    ${COLOR_YELLOW}-c, --config${COLOR_RESET}                 Prompt for all configuration settings"
-    echo -e "    ${COLOR_YELLOW}-D, --del-ssh-key${COLOR_RESET}            Delete SSH key pairs for remote user (skips push operation)"
-    echo -e "    ${COLOR_YELLOW}-f, --filter-sql${COLOR_RESET}             Filter SQL dump to remove privileged statements (slower export)"
+    echo -e "    ${COLOR_YELLOW}-D, --del-ssh-key${COLOR_RESET}            Delete SSH key pairs for remote user (skips pull operation)"
+    echo -e "    ${COLOR_YELLOW}-f, --filter-sql${COLOR_RESET}             Filter SQL dump to remove privileged statements (slower import)"
     echo ""
     echo -e "    ${COLOR_YELLOW}-e, --exclude ${COLOR_RESET}LIST           Space-delimited list of paths to exclude (quote the list)"
     echo -e "                                    Example: -e \"wp-content/plugins wp-content/themes/mytheme myfile.js\""
-    echo -e "    ${COLOR_YELLOW}-p, --install-plugins${COLOR_RESET} LIST   Space-delimited list of plugins to install"
+    echo -e "    ${COLOR_YELLOW}-p, --install-plugins${COLOR_RESET} LIST   Space-delimited list of plugins to install locally"
     echo -e "                                    Example: --install-plugins \"woocommerce contact-form-7\""
-    echo -e "    ${COLOR_YELLOW}-r, --remote-cmds${COLOR_RESET} CMD        Run custom commands on remote (quote the commands)"
+    echo -e "    ${COLOR_YELLOW}-r, --remote-cmds${COLOR_RESET} CMD        Run custom commands on local site after pull (quote the commands)"
     echo -e "                                    Example: --remote-cmds \"wp theme install twentytwenty\""
     echo ""
     echo -e "    ${COLOR_BOLD_CYAN}Option Flags:${COLOR_RESET}"
     echo -e "    ${COLOR_YELLOW}--search-replace${COLOR_RESET}             Run wp search-replace (default: yes)"
     echo -e "    ${COLOR_YELLOW}--no-search-replace${COLOR_RESET}          Skip wp search-replace"
     echo -e "    ${COLOR_YELLOW}--files-only${COLOR_RESET}                 Skip database operations (default: no)"
-    echo -e "    ${COLOR_YELLOW}--no-db-import${COLOR_RESET}               Don't import database on remote (default: no)"
+    echo -e "    ${COLOR_YELLOW}--no-db-import${COLOR_RESET}               Don't import database locally (default: no)"
     echo -e "    ${COLOR_YELLOW}--exclude-wpconfig${COLOR_RESET}           Exclude wp-config.php (default: yes)"
     echo -e "    ${COLOR_YELLOW}--no-exclude-wpconfig${COLOR_RESET}        Include wp-config.php in sync"
-    echo -e "    ${COLOR_YELLOW}--disable-wp-debug${COLOR_RESET}           Disable WP_DEBUG temporarily (default: no)"
+    echo -e "    ${COLOR_YELLOW}--disable-wp-debug${COLOR_RESET}           Disable WP_DEBUG temporarily on local (default: no)"
     echo -e "    ${COLOR_YELLOW}--all-tables-with-prefix${COLOR_RESET}     Use --all-tables-with-prefix for wp search-replace (default: no)"
     echo -e "    ${COLOR_YELLOW}-n, --dry-run${COLOR_RESET}                Simulate the operation without making destructive changes"
     echo -e "    ${COLOR_YELLOW}--backup-db${COLOR_RESET}                  Backup the destination DB before importing (timestamped .sql file)"
@@ -194,11 +194,11 @@ show_help() {
     echo "    $0 --del-ssh-key"
     echo ""
     echo -e "${COLOR_BOLD_GREEN}REQUIREMENTS:${COLOR_RESET}"
-    echo "    - WP-CLI installed on both source and remote servers"
+    echo "    - WP-CLI installed on both local and remote servers"
     echo "    - SSH access to remote server (ssh key pair generator included)"
     echo ""
     echo -e "${COLOR_BOLD_GREEN}CONFIGURATION:${COLOR_RESET}"
-    echo "    Configuration is saved to ~/.wp-push-remote.conf after using --config"
+    echo "    Configuration is saved to ~/.wp-pull-remote.conf after using --config"
     echo "    and automatically loaded on subsequent runs."
     echo ""
     echo "    Default path structure: /sites/{domain}/files"
@@ -214,21 +214,21 @@ show_help() {
 ####################################################################################
 
 # Configuration file location
-config_file="${HOME}/.wp-push-remote.conf"
+config_file="${HOME}/.wp-pull-remote.conf"
 
-# SOURCE
+# LOCAL (destination of pull)
 source_path_prefix="" # use trailing slash
 source_webroot="files" # no preceding or trailing slash
 
-# REMOTE
+# REMOTE (source of pull)
 remote_ip_address=""
 remote_user=""
 remote_path_prefix="" # use trailing slash
 remote_webroot="files" # no preceding or trailing slash
-plugins_to_install="" # space separated list of plugins to install on remote
+plugins_to_install="" # space separated list of plugins to install locally after pull
 
 # WP-CLI search-replace (will be auto-derived from paths if not set)
-# rewrites for URLs
+# rewrites for URLs - NOTE: pull reverses direction (remote_url -> source_url)
 wp_search_replace_source_url=''
 wp_search_replace_remote_url=''
 # rewrites for file paths
@@ -236,14 +236,14 @@ wp_search_replace_source_path=''
 wp_search_replace_remote_path=''
 
 # Options flags (1 = YES, 0 = NO)
-do_search_replace=1    # run 'wp search-replace' on remote, once for URLs and once for file paths
+do_search_replace=1    # run 'wp search-replace' locally after import
 files_only=0           # don't do a database dump & import
-no_db_import=0         # don't run db import on remote
-install_plugins=0      # install plugins on remote
-remote_commands=""     # custom commands to run on remote
-exclude_wpconfig=1     # exclude the wp-config.php file from the rsync to remote, you probably don't want to change this
+no_db_import=0         # don't run db import locally
+install_plugins=0      # install plugins locally after pull
+remote_commands=""     # custom commands to run on local site after pull
+exclude_wpconfig=1     # exclude the wp-config.php file from rsync, you probably don't want to change this
 unattended_mode=0      # flag for unattended mode
-disable_wp_debug=0     # disable WP_DEBUG on remote for the duration of the push, then revert it back to the original state
+disable_wp_debug=0     # disable WP_DEBUG on local for the duration of the pull, then revert back
 prompt_config=0        # flag to prompt for configuration
 delete_ssh_keys=0      # flag to delete SSH key pairs
 all_tables_with_prefix=0  # use --all-tables-with-prefix option for wp search-replace commands
@@ -263,7 +263,7 @@ load_config() {
 # Save configuration to file
 save_config() {
     cat > "$config_file" << EOF
-# WP Push Remote Configuration
+# WP Pull Remote Configuration
 # Generated on $(date)
 
 source_path_prefix="$source_path_prefix"
@@ -338,7 +338,6 @@ delete_ssh_key_pairs() {
     exit 0
 }
 
-
 # Extract domain from path (e.g., /sites/example.com/ -> example.com)
 extract_domain_from_path() {
     local path="$1"
@@ -357,7 +356,7 @@ derive_url_from_path() {
     fi
 }
 
-# Excludes for rsync to remote (edit as required)
+# Excludes for rsync from remote (edit as required)
 excludes=(.git .maintenance wp-content/cache wp-content/uploads/wp-migrate-db /wp-content/updraft)
 # Or just add to the array like this:
 # excludes+=(.user.ini)
@@ -371,12 +370,19 @@ cleanup_on_exit() {
     local exit_code=$?
     if [[ $exit_code -ne 0 ]]; then
         print_error "\nScript interrupted or failed with exit code: $exit_code"
-        # Clean up any temporary database exports
+        # Clean up any temporary database files on local
         if [[ -n "${source_path}" ]] && [[ -n "${db_export_prefix}" ]] && [[ -n "${rnd_str_key}" ]]; then
             if ls "${source_path}/${db_export_prefix}"*"${rnd_str_key}.sql" >/dev/null 2>&1; then
-                print_info "Cleaning up temporary database export files..."
+                print_info "Cleaning up temporary database files on local..."
                 rm -f "${source_path}/${db_export_prefix}"*"${rnd_str_key}.sql"
             fi
+        fi
+        # Clean up database export from remote server if it was created
+        if [[ -n "${ssh_key_path}" ]] && [[ -n "${remote_user}" ]] && [[ -n "${remote_ip_address}" ]] && \
+           [[ -n "${remote_path}" ]] && [[ -n "${db_export_prefix}" ]] && [[ -n "${rnd_str_key}" ]]; then
+            print_info "Attempting to clean up database export from remote server..."
+            ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS:-} ${remote_user}@${remote_ip_address} \
+                "rm -f ${remote_path}/${db_export_prefix}*${rnd_str_key}.sql" 2>/dev/null || true
         fi
     fi
 }
@@ -435,7 +441,7 @@ validate_config() {
     fi
     
     if [[ -z "$source_path_prefix" ]]; then
-        print_error "Source path prefix is not set!"
+        print_error "Local path prefix is not set!"
         errors=$((errors + 1))
     fi
     
@@ -515,26 +521,26 @@ function user_prompt_default_no() {
 function prompt_for_config() {
     print_header "CONFIGURATION SETUP"
     
-    print_info "Let's configure the SOURCE and REMOTE settings."
+    print_info "Let's configure the LOCAL (destination) and REMOTE (source) settings."
     print_info "Press Enter to accept defaults shown in [brackets]"
     echo ""
     
-    # SOURCE configuration
-    print_step "SOURCE Configuration"
+    # LOCAL configuration
+    print_step "LOCAL Configuration (destination of pull)"
     
     # Detect current domain from hostname or use saved value
     local current_domain=$(hostname -f 2>/dev/null || hostname)
     local default_source_prefix="${source_path_prefix:-/sites/${current_domain}/}"
     local default_source_webroot="${source_webroot:-files}"
     
-    read -p "$(echo -e "${COLOR_CYAN}Source path prefix${COLOR_RESET} [${default_source_prefix}]: ")" input_source_path_prefix
+    read -p "$(echo -e "${COLOR_CYAN}Local path prefix${COLOR_RESET} [${default_source_prefix}]: ")" input_source_path_prefix
     source_path_prefix="${input_source_path_prefix:-$default_source_prefix}"
     
-    read -p "$(echo -e "${COLOR_CYAN}Source webroot${COLOR_RESET} [${default_source_webroot}]: ")" input_source_webroot
+    read -p "$(echo -e "${COLOR_CYAN}Local webroot${COLOR_RESET} [${default_source_webroot}]: ")" input_source_webroot
     source_webroot="${input_source_webroot:-$default_source_webroot}"
     
     # REMOTE configuration
-    print_step "REMOTE Configuration"
+    print_step "REMOTE Configuration (source of pull)"
     
     # Extract source domain for remote default
     local source_domain=$(extract_domain_from_path "$source_path_prefix")
@@ -782,7 +788,7 @@ fi
 clear
 
 # Show banner
-print_header "WP Push Remote v${script_version}"
+print_header "WP Pull Remote v${script_version}"
 
 # Load saved configuration (unless prompting for new config)
 if [[ $prompt_config -eq 0 ]]; then
@@ -857,33 +863,33 @@ fi
 # Get hostname IP (handle multiple IPs)
 local_ip=$(hostname -I 2>/dev/null | awk '{print $1}' || hostname)
 
-print_step "START WP PUSH site FROM ${local_ip} TO ${remote_ip_address}"
-print_info "Script: 'wp-push-remote.sh' v${script_version}"
+print_step "START WP PULL site FROM ${remote_ip_address} TO ${local_ip}"
+print_info "Script: 'wp-pull-remote.sh' v${script_version}"
 
-# Try to detect source URL only if WordPress is installed and accessible
+# Detect LOCAL (destination) URL before any operations - this is what we replace TO after import
 if [[ -f "${source_path}/wp-config.php" ]]; then
     source_url=$(wp option get siteurl --path="${source_path}" 2>/dev/null || echo "")
     if [[ -n "$source_url" ]]; then
-        print_info "Source URL: ${source_url}"
-        # Assign detected source URL to search-replace variable if not already set
+        print_info "Local URL: ${source_url}"
+        # Assign detected local URL to search-replace variable if not already set
         if [[ -z "$wp_search_replace_source_url" ]]; then
             wp_search_replace_source_url="$source_url"
         fi
     else
-        print_info "Source URL: Unable to detect (WP-CLI may not be configured)"
+        print_info "Local URL: Unable to detect (WP-CLI may not be configured)"
     fi
 else
-    print_info "Source URL: Not detected (WordPress not found at ${source_path})"
+    print_info "Local URL: Not detected (WordPress not found at ${source_path})"
 fi
 
-echo -e "${COLOR_CYAN}Source:${COLOR_RESET} ${current_user}@${source_path}"
-echo -e "${COLOR_CYAN}Remote:${COLOR_RESET} ${remote_user}@${remote_ip_address}:${remote_path}"
+echo -e "${COLOR_CYAN}Remote (source):${COLOR_RESET} ${remote_user}@${remote_ip_address}:${remote_path}"
+echo -e "${COLOR_CYAN}Local (destination):${COLOR_RESET} ${current_user}@${source_path}"
 echo -e "${COLOR_CYAN}Excludes:${COLOR_RESET} ${excludes[*]}"
 if [[ -n "${plugins_to_install}" ]]; then
     echo -e "${COLOR_CYAN}Plugins to install:${COLOR_RESET} ${plugins_to_install}"
 fi
 if [[ -n "${remote_commands}" ]]; then
-    echo -e "${COLOR_CYAN}Remote commands:${COLOR_RESET} ${remote_commands}"
+    echo -e "${COLOR_CYAN}Post-pull commands:${COLOR_RESET} ${remote_commands}"
 fi
 
 # Display option flags
@@ -907,7 +913,7 @@ if (( dry_run == 1 )); then
 fi
 
 if (( filter_sql == 1 )); then
-    print_warning "SQL filtering is ENABLED (-f/--filter-sql). Export step may take longer."
+    print_warning "SQL filtering is ENABLED (-f/--filter-sql). Import step may take longer."
 fi
 
 # Check for existing SSH keys (Ed25519 preferred, RSA fallback)
@@ -926,7 +932,7 @@ if [[ -z "$ssh_key_path" ]]; then
         if ( user_prompt "No SSH key found - OK to generate one now?" ); then
             # Generate SSH key (ed25519 is preferred on Ubuntu 22.04+ for better performance and security)
             print_info "Generating Ed25519 SSH key (recommended for Ubuntu 22.04+)..."
-            if ssh-keygen -t ed25519 -C "${current_user}@${local_ip} - Added by wp-push-remote.sh" -f ~/.ssh/id_ed25519_remote_${remote_user} -N ""; then
+            if ssh-keygen -t ed25519 -C "${current_user}@${local_ip} - Added by wp-pull-remote.sh" -f ~/.ssh/id_ed25519_remote_${remote_user} -N ""; then
                 # Set proper permissions
                 chmod 600 ~/.ssh/id_ed25519_remote_${remote_user}
                 chmod 644 ~/.ssh/id_ed25519_remote_${remote_user}.pub
@@ -983,33 +989,139 @@ if [[ "$_remote_wp_check" == "public" ]]; then
 fi
 unset _remote_wp_check _old_remote_path
 
-if ( ! user_prompt "Proceed with the site PUSH?"); then
+if ( ! user_prompt "Proceed with the site PULL?"); then
     print_error "ABORTED!"
     exit 1
 fi
 
 ####################################################################################
-# Run PUSH
+# Run PULL
 ####################################################################################
 
-print_header "STARTING PUSH OPERATION"
+print_header "STARTING PULL OPERATION"
 
 # Record start time
 start_time=$(date +%s)
 
 if (( files_only == 0 && dry_run == 1 )); then
-    print_info "[DRY-RUN] Would export local database to ${source_path}/${source_db_name}"
+    print_info "[DRY-RUN] Would export remote database at ${remote_path}/${source_db_name}"
 fi
 
-if (( files_only == 0 && dry_run == 0 ))
-then
-    # Dump database
-    print_step "EXPORTING database ..."
+if (( files_only == 0 && dry_run == 0 )); then
+    # Export database on REMOTE server
+    print_step "EXPORTING database on REMOTE (${remote_ip_address}) ..."
+    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
+        print_success "Database exported on remote successfully"
+    else
+        print_error "Failed to export database on remote"
+        exit 1
+    fi
+fi
+
+# Check local disk space before pulling
+if [[ $dry_run -eq 0 ]]; then
+    check_disk_space "$(dirname "${source_path}")" "${source_path}" || print_warning "Continuing despite disk space warning..."
+fi
+
+# Pull files from remote to local
+print_step "RSYNC-ing files FROM REMOTE to LOCAL ..."
+
+# run rsync with exclusions (direction reversed: remote -> local)
+rsync_dry_flag=""
+(( dry_run == 1 )) && rsync_dry_flag="--dry-run"
+if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${remote_user}@${remote_ip_address}:${remote_path}/ ${source_path}/; then
+    print_success "Files synced successfully"
+else
+    print_error "Rsync failed"
+    exit 1
+fi
+
+# Detect REMOTE URL after rsync (remote DB is unchanged; detect before local DB import)
+# Used as the search term in search-replace (the URL currently in the imported DB)
+if (( do_search_replace == 1 && files_only == 0 && no_db_import == 0 )); then
+    if [[ -z "${wp_search_replace_remote_url}" ]]; then
+        print_info "Detecting remote site URL for search-replace..."
+        wp_search_replace_remote_url=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp option get siteurl --path='${remote_path}' 2>/dev/null" | tr -d '\n')
+        if [[ -n "$wp_search_replace_remote_url" ]]; then
+            print_info "Remote URL detected: ${wp_search_replace_remote_url}"
+        else
+            print_warning "Unable to detect remote URL - search-replace may not work correctly"
+        fi
+    fi
+fi
+
+# Check and synchronize table prefixes if database operations are enabled
+# For pull: local prefix must match remote prefix (the data being imported)
+if (( files_only == 0 && no_db_import == 0 )); then
+    print_step "Checking table prefix compatibility ..."
+    
+    # Get remote table prefix (source of data being imported)
+    remote_table_prefix=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db prefix --path='${remote_path}' 2>/dev/null" | tr -d '\n')
+    if [[ -z "$remote_table_prefix" ]]; then
+        print_warning "Unable to detect remote table prefix"
+    else
+        print_info "Remote table prefix: ${remote_table_prefix}"
+    fi
+    
+    # Get local table prefix using wp-cli
+    source_table_prefix=$(wp db prefix --path="${source_path}" 2>/dev/null | tr -d '\n')
+    if [[ -z "$source_table_prefix" ]]; then
+        print_warning "Unable to detect local table prefix"
+    else
+        print_info "Local table prefix: ${source_table_prefix}"
+    fi
+    
+    # Compare prefixes and synchronize local to match remote if needed
+    if [[ -n "$remote_table_prefix" && -n "$source_table_prefix" && "$remote_table_prefix" != "$source_table_prefix" ]]; then
+        print_warning "Table prefix mismatch detected!"
+        print_warning "  Remote: ${remote_table_prefix}"
+        print_warning "  Local:  ${source_table_prefix}"
+        echo ""
+        
+        if (( unattended_mode == 0 )); then
+            if ( user_prompt "Synchronize local table prefix to match remote?" ); then
+                print_step "Resetting local database and updating table prefix ..."
+                wp db reset --yes --path="${source_path}"
+                wp config set table_prefix "${remote_table_prefix}" --path="${source_path}"
+                if [[ $? -eq 0 ]]; then
+                    print_success "Local table prefix synchronized to: ${remote_table_prefix}"
+                else
+                    print_error "Failed to synchronize local table prefix"
+                    exit 1
+                fi
+            else
+                print_warning "Continuing with mismatched table prefixes - import may fail!"
+            fi
+        else
+            print_warning "Unattended mode: Skipping table prefix synchronization"
+            print_warning "Database import may fail with mismatched prefixes!"
+        fi
+    elif [[ -n "$remote_table_prefix" && -n "$source_table_prefix" ]]; then
+        print_success "Table prefixes match: ${remote_table_prefix}"
+    fi
+fi
+
+# Run post-pull commands on LOCAL
+print_step "EXECUTING post-pull operations on LOCAL (${local_ip})..."
+
+if (( disable_wp_debug == 1 )); then
+    echo -e "\n${COLOR_BLUE}Creating backup of wp-config.php ...${COLOR_RESET}"
+    cp -v ${source_path}/wp-config.php ${source_path}/wp-config.php.bak
+    echo -e "${COLOR_BLUE}Disabling WP_DEBUG in wp-config.php ...${COLOR_RESET}"
+    sed -i "s/define(\s*'WP_DEBUG'.*/define('WP_DEBUG', false);/g" ${source_path}/wp-config.php
+fi
+
+if (( files_only == 0 && no_db_import == 0 )); then
+
+    # Optionally filter SQL on local before import
     if (( filter_sql == 1 )); then
-        # Filter while exporting in a single pass (faster than rewriting the file multiple times).
-        # If streaming filter fails for any reason, fall back to the legacy export+sed filter path.
-        print_info "Exporting and filtering SQL in a single pass..."
-        if ( set -o pipefail; wp db export - --path="${source_path}" | awk '
+        if [[ ! -s "${source_path}/${source_db_name}" ]]; then
+            print_error "Database export file not found or empty: ${source_path}/${source_db_name}"
+            exit 1
+        fi
+        print_info "Filtering SQL file to remove privileged statements..."
+        local_filtered="${source_path}/${source_db_name}.filtered"
+        if awk '
             BEGIN {
                 in_gtid_block = 0
                 kept_lines = 0
@@ -1018,7 +1130,6 @@ then
                 line = $0
                 lower = tolower(line)
 
-                # Remove full GTID_PURGED blocks (can span multiple lines).
                 if (in_gtid_block == 1) {
                     if (line ~ /;[[:space:]]*$/) {
                         in_gtid_block = 0
@@ -1033,7 +1144,6 @@ then
                     next
                 }
 
-                # Remove privileged/session statements that often fail on restricted hosts.
                 if (lower ~ /^[[:space:]]*set[[:space:]]+@@(session|global)\./) next
                 if (lower ~ /^[[:space:]]*set[[:space:]]+@mysqldump_temp_log_bin/) next
                 if (lower ~ /set[[:space:]]+sql_log_bin[[:space:]]*=/) next
@@ -1050,249 +1160,131 @@ then
                     exit 42
                 }
             }
-        ' > "${source_path}/${source_db_name}" ); then
-            if [[ ! -s "${source_path}/${source_db_name}" ]]; then
+        ' "${source_path}/${source_db_name}" > "$local_filtered"; then
+            if [[ ! -s "$local_filtered" ]]; then
                 print_error "Filtered SQL output is empty"
+                rm -f "$local_filtered"
                 exit 1
             fi
-            print_success "Database exported and filtered successfully"
+            mv "$local_filtered" "${source_path}/${source_db_name}"
+            print_success "SQL filtered successfully"
         else
-            print_warning "Single-pass filter failed - falling back to legacy filtering path"
-            if wp db export ${source_path}/${source_db_name} --path="${source_path}"; then
-                print_info "Filtering SQL file to remove privileged statements..."
-                sed -i -E \
-                    '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@@[Gg][Ll][Oo][Bb][Aa][Ll]\.[Gg][Tt][Ii][Dd]_[Pp][Uu][Rr][Gg][Ee][Dd]/,/;[[:space:]]*$/d' \
-                    ${source_path}/${source_db_name}
+            rm -f "$local_filtered"
+            print_warning "AWK filter failed - falling back to sed filter"
+            sed -i -E \
+                '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@@[Gg][Ll][Oo][Bb][Aa][Ll]\.[Gg][Tt][Ii][Dd]_[Pp][Uu][Rr][Gg][Ee][Dd]/,/;[[:space:]]*$/d' \
+                ${source_path}/${source_db_name}
 
-                sed -i -E \
-                    -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]+([Ss][Ee][Ss][Ss][Ii][Oo][Nn]|[Gg][Ll][Oo][Bb][Aa][Ll])[[:space:]]+/d' \
-                    -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@@([Ss][Ee][Ss][Ss][Ii][Oo][Nn]|[Gg][Ll][Oo][Bb][Aa][Ll])\./d' \
-                    -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@MYSQLDUMP_TEMP_LOG_BIN/d' \
-                    -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@@[Ss][Ee][Ss][Ss][Ii][Oo][Nn]\.[Ss][Qq][Ll]_[Ll][Oo][Gg]_[Bb][Ii][Nn]/d' \
-                    -e '/\/\*![0-9]*[[:space:]]*[Ss][Ee][Tt][[:space:]]*[Tt][Ii][Mm][Ee]_[Zz][Oo][Nn][Ee]/d' \
-                    -e '/\/\*![0-9]*[[:space:]]*[Ss][Ee][Tt][[:space:]]*[Ss][Ee][Ss][Ss][Ii][Oo][Nn][[:space:]]*[Ss][Qq][Ll]_[Mm][Oo][Dd][Ee]/d' \
-                    -e '/\/\*![0-9]*[[:space:]]*[Ss][Ee][Tt].*[Ss][Yy][Ss][Tt][Ee][Mm]_[Vv][Aa][Rr][Ii][Aa][Bb][Ll][Ee][Ss]_[Aa][Dd][Mm][Ii][Nn]/d' \
-                    ${source_path}/${source_db_name}
+            sed -i -E \
+                -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]+([Ss][Ee][Ss][Ss][Ii][Oo][Nn]|[Gg][Ll][Oo][Bb][Aa][Ll])[[:space:]]+/d' \
+                -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@@([Ss][Ee][Ss][Ss][Ii][Oo][Nn]|[Gg][Ll][Oo][Bb][Aa][Ll])\./d' \
+                -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@MYSQLDUMP_TEMP_LOG_BIN/d' \
+                -e '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@@[Ss][Ee][Ss][Ss][Ii][Oo][Nn]\.[Ss][Qq][Ll]_[Ll][Oo][Gg]_[Bb][Ii][Nn]/d' \
+                -e '/\/\*![0-9]*[[:space:]]*[Ss][Ee][Tt][[:space:]]*[Tt][Ii][Mm][Ee]_[Zz][Oo][Nn][Ee]/d' \
+                -e '/\/\*![0-9]*[[:space:]]*[Ss][Ee][Tt][[:space:]]*[Ss][Ee][Ss][Ss][Ii][Oo][Nn][[:space:]]*[Ss][Qq][Ll]_[Mm][Oo][Dd][Ee]/d' \
+                -e '/\/\*![0-9]*[[:space:]]*[Ss][Ee][Tt].*[Ss][Yy][Ss][Tt][Ee][Mm]_[Vv][Aa][Rr][Ii][Aa][Bb][Ll][Ee][Ss]_[Aa][Dd][Mm][Ii][Nn]/d' \
+                ${source_path}/${source_db_name}
 
-                if [[ ! -s "${source_path}/${source_db_name}" ]]; then
-                    print_error "Legacy SQL filtering produced an empty file"
-                    exit 1
-                fi
-                print_success "Database exported and filtered successfully (legacy mode)"
-            else
-                print_error "Failed to export database"
+            if [[ ! -s "${source_path}/${source_db_name}" ]]; then
+                print_error "Legacy SQL filtering produced an empty file"
                 exit 1
             fi
-        fi
-    else
-        if wp db export ${source_path}/${source_db_name} --path="${source_path}"; then
-            print_success "Database exported successfully"
-            print_info "Skipping SQL filtering (use -f or --filter-sql to enable)"
-        else
-            print_error "Failed to export database"
-            exit 1
+            print_success "Database filtered successfully (legacy mode)"
         fi
     fi
+
+    if (( backup_db == 1 && dry_run == 0 )); then
+        local_backup="${source_path}/wp-db-backup-$(date +%Y%m%d-%H%M%S).sql"
+        print_step "BACKING UP existing local database before import ..."
+        if wp db export "${local_backup}" --path="${source_path}"; then
+            print_success "Local DB backed up to: ${local_backup}"
+        else
+            print_warning "Local DB backup failed - continuing anyway"
+        fi
+    elif (( backup_db == 1 && dry_run == 1 )); then
+        print_info "[DRY-RUN] Would backup local database before import"
+    fi
+
+    echo -e "\n${COLOR_BLUE}IMPORTING database locally ...${COLOR_RESET}"
+    if wp db import ${source_path}/${source_db_name} --path="${source_path}"; then
+        echo -e "${COLOR_GREEN}Database imported successfully${COLOR_RESET}"
+    else
+        echo -e "${COLOR_RED}[ERROR] Database import failed${COLOR_RESET}"
+        echo -e "${COLOR_YELLOW}[INFO] If you see 'Access denied' errors related to SUPER privileges, run with -f/--filter-sql to filter the dump.${COLOR_RESET}"
+    fi
+    echo -e "\n${COLOR_BLUE}DELETING local database import file ...${COLOR_RESET}"
+    rm -v ${source_path}/${source_db_name}
 fi
 
-# Check local disk space (rsync staging) — local source should already be present
-if [[ $dry_run -eq 0 ]]; then
-    check_disk_space "$(dirname "${source_path}")" "${source_path}" || print_warning "Continuing despite disk space warning..."
-fi
-
-# Push files to remote
-print_step "RSYNC-ing files to REMOTE ..."
-
-# run rsync with exclusions
-rsync_dry_flag=""
-(( dry_run == 1 )) && rsync_dry_flag="--dry-run"
-if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${source_path}/ ${remote_user}@${remote_ip_address}:${remote_path}; then
-    print_success "Files synced successfully"
-else
-    print_error "Rsync failed"
-    exit 1
-fi
-
-# Detect remote URL BEFORE any database operations (while remote WordPress is still intact)
-# This MUST happen before table prefix synchronization which may reset the database
 if (( do_search_replace == 1 && files_only == 0 && no_db_import == 0 )); then
-    if [[ -z "${wp_search_replace_remote_url}" ]]; then
-        print_info "Detecting remote site URL before database operations..."
-        wp_search_replace_remote_url=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp option get siteurl --path='${remote_path}' 2>/dev/null" | tr -d '\n')
-        if [[ -n "$wp_search_replace_remote_url" ]]; then
-            print_info "Remote URL detected: ${wp_search_replace_remote_url}"
+
+    # Run search-replace for URLs: replace remote URL with local URL
+    if [[ -n "${wp_search_replace_remote_url}" && -n "${wp_search_replace_source_url}" ]]; then
+        echo -e "\n${COLOR_BLUE}EXECUTING 'wp search-replace' for URLs ...${COLOR_RESET}"
+        echo "Replacing: ${wp_search_replace_remote_url} -> ${wp_search_replace_source_url}"
+        if (( all_tables_with_prefix == 1 )); then
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_url}" "${wp_search_replace_source_url}" --report-changed-only --format=count --all-tables-with-prefix --path="${source_path}")
         else
-            print_warning "Unable to detect remote URL - search-replace may not work correctly"
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_url}" "${wp_search_replace_source_url}" --report-changed-only --format=count --path="${source_path}")
         fi
+        echo "Total replacements made: ${replacement_count}"
+    else
+        echo -e "${COLOR_YELLOW}[WARNING] Skipping URL search-replace - local or remote URL not available${COLOR_RESET}"
     fi
-fi
 
-# Check and synchronize table prefixes if database operations are enabled
-if (( files_only == 0 && no_db_import == 0 )); then
-    print_step "Checking table prefix compatibility ..."
-    
-    # Get source table prefix using wp-cli
-    source_table_prefix=$(wp db prefix --path="${source_path}" 2>/dev/null | tr -d '\n')
-    if [[ -z "$source_table_prefix" ]]; then
-        print_warning "Unable to detect source table prefix"
-    else
-        print_info "Source table prefix: ${source_table_prefix}"
-    fi
-    
-    # Get remote table prefix using wp-cli via SSH
-    remote_table_prefix=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db prefix --path='${remote_path}' 2>/dev/null" | tr -d '\n')
-    if [[ -z "$remote_table_prefix" ]]; then
-        print_warning "Unable to detect remote table prefix"
-    else
-        print_info "Remote table prefix: ${remote_table_prefix}"
-    fi
-    
-    # Compare prefixes and synchronize if needed
-    if [[ -n "$source_table_prefix" && -n "$remote_table_prefix" && "$source_table_prefix" != "$remote_table_prefix" ]]; then
-        print_warning "Table prefix mismatch detected!"
-        print_warning "  Source: ${source_table_prefix}"
-        print_warning "  Remote: ${remote_table_prefix}"
-        echo ""
-        
-        if (( unattended_mode == 0 )); then
-            if ( user_prompt "Synchronize remote table prefix to match source?" ); then
-                print_step "Resetting remote database and updating table prefix ..."
-                ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} << SYNC_EOF
-wp db reset --yes --path="${remote_path}"
-wp config set table_prefix "${source_table_prefix}" --path="${remote_path}"
-echo "Table prefix synchronized: ${source_table_prefix}"
-SYNC_EOF
-                if [[ $? -eq 0 ]]; then
-                    print_success "Table prefix synchronized successfully"
-                else
-                    print_error "Failed to synchronize table prefix"
-                    exit 1
-                fi
-            else
-                print_warning "Continuing with mismatched table prefixes - import may fail!"
-            fi
+    # Run search-replace for paths: replace remote path with local path
+    if [[ -n "${wp_search_replace_remote_path}" && -n "${wp_search_replace_source_path}" ]]; then
+        echo -e "\n${COLOR_BLUE}EXECUTING 'wp search-replace' for file PATHs ...${COLOR_RESET}"
+        echo "Replacing: ${wp_search_replace_remote_path} -> ${wp_search_replace_source_path}"
+        if (( all_tables_with_prefix == 1 )); then
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_path}" "${wp_search_replace_source_path}" --report-changed-only --format=count --all-tables-with-prefix --path="${source_path}")
         else
-            print_warning "Unattended mode: Skipping table prefix synchronization"
-            print_warning "Database import may fail with mismatched prefixes!"
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_path}" "${wp_search_replace_source_path}" --report-changed-only --format=count --path="${source_path}")
         fi
-    elif [[ -n "$source_table_prefix" && -n "$remote_table_prefix" ]]; then
-        print_success "Table prefixes match: ${source_table_prefix}"
+        echo "Total replacements made: ${replacement_count}"
+    else
+        echo -e "${COLOR_YELLOW}[WARNING] Skipping path search-replace - local or remote path not available${COLOR_RESET}"
     fi
-fi
-
-# Connect to remote and run local commands
-print_step "EXECUTING post-deployment commands on REMOTE (${remote_ip_address})..."
-ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} << EOF
-shopt -s dotglob
-echo -e "\n${COLOR_CYAN}Connected to REMOTE: \$(whoami)@\$(hostname) (\$(hostname -I))${COLOR_RESET}"
-
-if (( ${disable_wp_debug} == 1 )); then
-echo -e "\n${COLOR_BLUE}Creating backup of wp-config.php ...${COLOR_RESET}"
-cp -v ${remote_path}/wp-config.php ${remote_path}/wp-config.php.bak
-# Disable WP_DEBUG to reduce output noise to the terminal
-echo -e "${COLOR_BLUE}Disabling WP_DEBUG in wp-config.php ...${COLOR_RESET}"
-sed -i "s/define(\s*'WP_DEBUG'.*/define('WP_DEBUG', false);/g" ${remote_path}/wp-config.php
-fi
-
-if (( ${backup_db} == 1 && ${files_only} == 0 && ${no_db_import} == 0 && ${dry_run} == 0 )); then
-echo -e "\n${COLOR_BLUE}BACKING UP existing remote database before import ...${COLOR_RESET}"
-backup_file="${remote_path}/wp-db-backup-$(date +%Y%m%d-%H%M%S).sql"
-if wp db export "\${backup_file}" --path="${remote_path}"; then
-    echo -e "${COLOR_GREEN}Remote DB backed up to: \${backup_file}${COLOR_RESET}"
-else
-    echo -e "${COLOR_YELLOW}[WARNING] Remote DB backup failed - continuing anyway${COLOR_RESET}"
-fi
-elif (( ${backup_db} == 1 && ${files_only} == 0 && ${no_db_import} == 0 && ${dry_run} == 1 )); then
-echo -e "${COLOR_YELLOW}[DRY-RUN] Would backup remote database before import${COLOR_RESET}"
-fi
-
-if (( ${files_only} == 0 && ${no_db_import} == 0 )); then
-echo -e "\n${COLOR_BLUE}IMPORTING database ...${COLOR_RESET}"
-if wp db import ${remote_path}/${source_db_name} --path="${remote_path}"; then
-    echo -e "${COLOR_GREEN}Database imported successfully${COLOR_RESET}"
-else
-    echo -e "${COLOR_RED}[ERROR] Database import failed${COLOR_RESET}"
-    echo -e "${COLOR_YELLOW}[INFO] If you see 'Access denied' errors related to SUPER privileges, this may be due to MySQL user restrictions on the destination server.${COLOR_RESET}"
-fi
-echo -e "\n${COLOR_BLUE}DELETING imported database source file ...${COLOR_RESET}"
-rm -v ${remote_path}/${source_db_name}
-fi
-
-
-if (( ${do_search_replace} == 1 && ${files_only} == 0 && ${no_db_import} == 0 )); then
-
-# Run search-replace for URLs if both are available
-if [[ -n "${wp_search_replace_source_url}" && -n "${wp_search_replace_remote_url}" ]]; then
-echo -e "\n${COLOR_BLUE}EXECUTING 'wp search-replace' for URLs ...${COLOR_RESET}"
-echo "Replacing: ${wp_search_replace_source_url} -> ${wp_search_replace_remote_url}"
-if (( ${all_tables_with_prefix} == 1 )); then
-replacement_count=\$(wp search-replace --precise "${wp_search_replace_source_url}" "${wp_search_replace_remote_url}" --report-changed-only --format=count --all-tables-with-prefix --path="${remote_path}")
-else
-replacement_count=\$(wp search-replace --precise "${wp_search_replace_source_url}" "${wp_search_replace_remote_url}" --report-changed-only --format=count --path="${remote_path}")
-fi
-echo "Total replacements made: \${replacement_count}"
-else
-echo -e "${COLOR_YELLOW}[WARNING] Skipping URL search-replace - source or remote URL not available${COLOR_RESET}"
-fi
-
-# Run search-replace for paths if both are available
-if [[ -n "${wp_search_replace_source_path}" && -n "${wp_search_replace_remote_path}" ]]; then
-echo -e "\n${COLOR_BLUE}EXECUTING 'wp search-replace' for file PATHs ...${COLOR_RESET}"
-echo "Replacing: ${wp_search_replace_source_path} -> ${wp_search_replace_remote_path}"
-if (( ${all_tables_with_prefix} == 1 )); then
-replacement_count=\$(wp search-replace --precise "${wp_search_replace_source_path}" "${wp_search_replace_remote_path}" --report-changed-only --format=count --all-tables-with-prefix --path="${remote_path}")
-else
-replacement_count=\$(wp search-replace --precise "${wp_search_replace_source_path}" "${wp_search_replace_remote_path}" --report-changed-only --format=count --path="${remote_path}")
-fi
-echo "Total replacements made: \${replacement_count}"
-else
-echo -e "${COLOR_YELLOW}[WARNING] Skipping path search-replace - source or remote path not available${COLOR_RESET}"
-fi
 fi
 
 # Flush cache once after all database operations
-if (( ${files_only} == 0 && ${no_db_import} == 0 )); then
-echo -e "${COLOR_BLUE}FLUSHING WP cache ...${COLOR_RESET}"
-wp cache flush --hard --path="${remote_path}"
+if (( files_only == 0 && no_db_import == 0 )); then
+    echo -e "${COLOR_BLUE}FLUSHING WP cache locally ...${COLOR_RESET}"
+    wp cache flush --hard --path="${source_path}"
 fi
 
-if (( ${install_plugins} == 1 )) && [[ -n "${plugins_to_install}" ]]; then
-echo -e "\n${COLOR_BLUE}INSTALLING plugins on remote ...${COLOR_RESET}"
-wp plugin install ${plugins_to_install} --path="${remote_path}"
-wp cache flush --path="${remote_path}"
+if (( install_plugins == 1 )) && [[ -n "${plugins_to_install}" ]]; then
+    echo -e "\n${COLOR_BLUE}INSTALLING plugins locally ...${COLOR_RESET}"
+    wp plugin install ${plugins_to_install} --path="${source_path}"
+    wp cache flush --path="${source_path}"
 fi
 
 if [[ -n "${remote_commands}" ]]; then
-echo -e "\n${COLOR_BLUE}EXECUTING custom commands on remote ...${COLOR_RESET}"
-# Run custom commands passed via --remote-cmds
-# Split commands by semicolon and process each one
-IFS=';' read -ra CMD_ARRAY <<< "${remote_commands}"
-for cmd in "\${CMD_ARRAY[@]}"; do
-    # Trim leading/trailing whitespace
-    cmd=\$(echo "\$cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*\$//')
-    # If the command starts with 'wp' and doesn't contain --path, add it automatically
-    if [[ "\$cmd" =~ ^wp[[:space:]] ]] && [[ ! "\$cmd" =~ --path ]]; then
-        eval "\$cmd --path=${remote_path}"
-    else
-        eval "\$cmd"
-    fi
-done
-# Use for running custom commands on the remote, after DB import and search-replace, for example:
-# this runs a url_replace with Elementor
-#echo -e "\n${COLOR_BLUE}Running Elementor replace_urls on remote server ...${COLOR_RESET}"
-#wp elementor replace_urls https:${wp_search_replace_source_url} https:${wp_search_replace_remote_url} --path="${remote_path}"
+    echo -e "\n${COLOR_BLUE}EXECUTING post-pull commands locally ...${COLOR_RESET}"
+    # Run commands on local site - split by semicolon and process each one
+    IFS=';' read -ra CMD_ARRAY <<< "${remote_commands}"
+    for cmd in "${CMD_ARRAY[@]}"; do
+        # Trim leading/trailing whitespace
+        cmd=$(echo "$cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        # If the command starts with 'wp' and doesn't contain --path, add it automatically
+        if [[ "$cmd" =~ ^wp[[:space:]] ]] && [[ ! "$cmd" =~ --path ]]; then
+            eval "$cmd --path=${source_path}"
+        else
+            eval "$cmd"
+        fi
+    done
 fi
 
-if (( ${disable_wp_debug} == 1 )); then
-# Revert wp-config
-echo -e "\n${COLOR_BLUE}Restoring wp-config.php from backup ...${COLOR_RESET}"
-mv -v ${remote_path}/wp-config.php.bak ${remote_path}/wp-config.php
+if (( disable_wp_debug == 1 )); then
+    # Revert wp-config
+    echo -e "\n${COLOR_BLUE}Restoring wp-config.php from backup ...${COLOR_RESET}"
+    mv -v ${source_path}/wp-config.php.bak ${source_path}/wp-config.php
 fi
-EOF
 
+# Cleanup: delete the database export file from the remote server
 if (( files_only == 0 && dry_run == 0 )); then
-    print_step "DELETING database backup from source server ..."
-    rm -v ${source_path}/${db_export_prefix}*${rnd_str_key}.sql # tidy up DB dumps
+    print_step "DELETING database backup from remote server ..."
+    ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "rm -f ${remote_path}/${db_export_prefix}*${rnd_str_key}.sql" && print_success "Remote database backup deleted"
 fi
 
 # Calculate execution time
@@ -1305,6 +1297,6 @@ print_success "Total execution time: ${minutes}:$(printf %02d ${seconds})"
 print_success "COMPLETED!"
 print_info "To delete SSH key pairs later, run with --del-ssh-key"
 echo -e "\n${COLOR_BOLD_GREEN}========================================${COLOR_RESET}"
-echo -e "${COLOR_BOLD_GREEN}    Push operation completed!${COLOR_RESET}"
+echo -e "${COLOR_BOLD_GREEN}    Pull operation completed!${COLOR_RESET}"
 echo -e "${COLOR_BOLD_GREEN}========================================${COLOR_RESET}\n"
-exit
+exit 0
