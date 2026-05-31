@@ -37,7 +37,7 @@ chmod +x wp-cli.phar && sudo mv wp-cli.phar /usr/local/bin/wp
 ```bash
 sudo git clone https://github.com/WPNET/wp-copy-remote.git /opt/wp-copy-remote
 cd /opt/wp-copy-remote
-sudo chmod +x wp-push-remote.sh wp-pull-remote.sh install.sh
+sudo chmod 700 wp-push-remote.sh wp-pull-remote.sh install.sh
 ```
 
 Install a script to a site user's directory (run as root):
@@ -95,7 +95,8 @@ Both scripts use the same options and flags. Configuration is stored separately:
 --exclude-wpconfig           Exclude wp-config.php (default: yes)
 --no-exclude-wpconfig        Include wp-config.php in sync
 --disable-wp-debug           Disable WP_DEBUG temporarily
---all-tables-with-prefix     Use --all-tables-with-prefix for search-replace
+--all-tables-with-prefix     Use --all-tables-with-prefix for search-replace (default: yes)
+--no-all-tables-with-prefix  Disable --all-tables-with-prefix for search-replace
 ```
 
 ## Examples

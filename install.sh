@@ -90,6 +90,9 @@ if [[ ! -f "$PUSH_SCRIPT" && ! -f "$PULL_SCRIPT" ]]; then
     exit 1
 fi
 
+# Restrict all .sh files in the source directory to root-only (0700)
+find "$SCRIPT_DIR" -maxdepth 1 -name "*.sh" -exec chmod 700 {} \;
+
 ####################################################################################
 # MAIN
 ####################################################################################
