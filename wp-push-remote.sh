@@ -171,7 +171,8 @@ show_help() {
     echo -e "    ${COLOR_YELLOW}--exclude-wpconfig${COLOR_RESET}           Exclude wp-config.php (default: yes)"
     echo -e "    ${COLOR_YELLOW}--no-exclude-wpconfig${COLOR_RESET}        Include wp-config.php in sync"
     echo -e "    ${COLOR_YELLOW}--disable-wp-debug${COLOR_RESET}           Disable WP_DEBUG temporarily (default: no)"
-    echo -e "    ${COLOR_YELLOW}--all-tables-with-prefix${COLOR_RESET}     Use --all-tables-with-prefix for wp search-replace (default: no)"
+    echo -e "    ${COLOR_YELLOW}--all-tables-with-prefix${COLOR_RESET}     Use --all-tables-with-prefix for wp search-replace (default: yes)"
+    echo -e "    ${COLOR_YELLOW}--no-all-tables-with-prefix${COLOR_RESET}  Disable --all-tables-with-prefix for wp search-replace"
     echo -e "    ${COLOR_YELLOW}-n, --dry-run${COLOR_RESET}                Simulate the operation without making destructive changes"
     echo -e "    ${COLOR_YELLOW}--backup-db${COLOR_RESET}                  Backup the destination DB before importing (timestamped .sql file)"
     echo -e "    ${COLOR_YELLOW}--log${COLOR_RESET} FILE                   Write all output to FILE in addition to terminal"
@@ -246,7 +247,7 @@ unattended_mode=0      # flag for unattended mode
 disable_wp_debug=0     # disable WP_DEBUG on remote for the duration of the push, then revert it back to the original state
 prompt_config=0        # flag to prompt for configuration
 delete_ssh_keys=0      # flag to delete SSH key pairs
-all_tables_with_prefix=0  # use --all-tables-with-prefix option for wp search-replace commands
+all_tables_with_prefix=1  # use --all-tables-with-prefix option for wp search-replace commands
 filter_sql=0           # filter SQL dump to remove privileged statements (can add processing time)
 dry_run=0              # dry-run mode: show what would happen without executing destructive steps
 backup_db=0            # backup existing destination DB before importing (creates timestamped .sql file)
@@ -562,7 +563,7 @@ function prompt_for_config() {
 ####################################################################################
 
 # Parse long options
-TEMP=$(getopt -o hucDfe:r:p:nv --long help,unattended,config,del-ssh-key,filter-sql,exclude:,search-replace,no-search-replace,files-only,no-db-import,install-plugins:,remote-cmds:,exclude-wpconfig,no-exclude-wpconfig,disable-wp-debug,all-tables-with-prefix,dry-run,backup-db,log:,version -n "$0" -- "$@" 2>/dev/null)
+TEMP=$(getopt -o hucDfe:r:p:nv --long help,unattended,config,del-ssh-key,filter-sql,exclude:,search-replace,no-search-replace,files-only,no-db-import,install-plugins:,remote-cmds:,exclude-wpconfig,no-exclude-wpconfig,disable-wp-debug,all-tables-with-prefix,no-all-tables-with-prefix,dry-run,backup-db,log:,version -n "$0" -- "$@" 2>/dev/null)
 
 # Check for getopt errors
 if [[ $? -ne 0 ]]; then
@@ -645,6 +646,10 @@ if [[ $? -ne 0 ]]; then
                 ;;
             --all-tables-with-prefix)
                 all_tables_with_prefix=1
+                shift
+                ;;
+            --no-all-tables-with-prefix)
+                all_tables_with_prefix=0
                 shift
                 ;;
             -n|--dry-run)
@@ -743,6 +748,10 @@ else
                 ;;
             --all-tables-with-prefix)
                 all_tables_with_prefix=1
+                shift
+                ;;
+            --no-all-tables-with-prefix)
+                all_tables_with_prefix=0
                 shift
                 ;;
             -n|--dry-run)
