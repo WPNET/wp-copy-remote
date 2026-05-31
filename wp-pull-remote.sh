@@ -17,6 +17,9 @@ script_version="1.1.0"
 #               wp-cli.yml to be configured in the source and remote site owner's home directory, with the correct path to the WP installation
 # Target OS:    Ubuntu 22.04 LTS or higher
 
+# Suppress PHP constant-redefinition warnings from wp-config.php
+export WP_CLI_PHP_ARGS="-d error_reporting=E_ERROR"
+
 ####################################################################################
 # COLOR DEFINITIONS FOR BETTER UX
 ####################################################################################
@@ -230,6 +233,7 @@ plugins_to_install="" # space separated list of plugins to install locally after
 # WP-CLI search-replace (will be auto-derived from paths if not set)
 # rewrites for URLs - NOTE: pull reverses direction (remote_url -> source_url)
 wp_search_replace_source_url=''
+local_url=''  # explicit local URL override (overrides DB detection for search-replace)
 wp_search_replace_remote_url=''
 # rewrites for file paths
 wp_search_replace_source_path=''
@@ -272,6 +276,7 @@ remote_ip_address="$remote_ip_address"
 remote_user="$remote_user"
 remote_path_prefix="$remote_path_prefix"
 remote_webroot="$remote_webroot"
+local_url="$local_url"
 EOF
     chmod 600 "$config_file"
     print_success "Configuration saved to $config_file"
@@ -869,9 +874,14 @@ print_info "Script: 'wp-pull-remote.sh' v${script_version}"
 # Detect LOCAL (destination) URL before any operations - this is what we replace TO after import
 if [[ -f "${source_path}/wp-config.php" ]]; then
     source_url=$(wp option get siteurl --path="${source_path}" 2>/dev/null || echo "")
-    if [[ -n "$source_url" ]]; then
+    # Prefer explicit local_url from config over DB-detected URL (DB may contain old remote URL after a prior import)
+    if [[ -n "$local_url" ]]; then
+        print_info "Local URL: ${local_url} (from config)"
+        if [[ -z "$wp_search_replace_source_url" ]]; then
+            wp_search_replace_source_url="$local_url"
+        fi
+    elif [[ -n "$source_url" ]]; then
         print_info "Local URL: ${source_url}"
-        # Assign detected local URL to search-replace variable if not already set
         if [[ -z "$wp_search_replace_source_url" ]]; then
             wp_search_replace_source_url="$source_url"
         fi
@@ -1010,7 +1020,7 @@ fi
 if (( files_only == 0 && dry_run == 0 )); then
     # Export database on REMOTE server
     print_step "EXPORTING database on REMOTE (${remote_ip_address}) ..."
-    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
+    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "WP_CLI_PHP_ARGS='-d error_reporting=E_ERROR' wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
         print_success "Database exported on remote successfully"
     else
         print_error "Failed to export database on remote"
