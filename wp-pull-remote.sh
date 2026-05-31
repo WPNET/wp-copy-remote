@@ -17,8 +17,6 @@ script_version="1.1.0"
 #               wp-cli.yml to be configured in the source and remote site owner's home directory, with the correct path to the WP installation
 # Target OS:    Ubuntu 22.04 LTS or higher
 
-# Filter PHP constant-redefinition warnings from all WP-CLI output (local and remote via SSH)
-exec 2> >(grep -v "^PHP Warning:" >&2)
 
 ####################################################################################
 # COLOR DEFINITIONS FOR BETTER UX
