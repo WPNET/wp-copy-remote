@@ -232,7 +232,7 @@ esac
 
 # ── Step 5: Create directory and copy script ──────────────────────────────────
 
-print_step "Step 5: Installing script"
+print_step "Step 5: Copying script"
 
 if [[ ! -d "$bin_dir" ]]; then
     print_info "Creating directory: ${bin_dir}"
@@ -242,11 +242,11 @@ if [[ ! -d "$bin_dir" ]]; then
     fi
 fi
 
-if ! ln -sf "$selected_script" "$install_path"; then
-    print_error "Failed to create symlink at ${install_path}"
+if ! cp "$selected_script" "$install_path"; then
+    print_error "Failed to copy script to ${install_path}"
     exit 1
 fi
-print_success "Symlink created: ${install_path} -> ${selected_script}"
+print_success "Script copied to: ${install_path}"
 
 # ── Step 6: Set ownership and permissions ────────────────────────────────────
 
@@ -258,8 +258,8 @@ else
     print_warning "Could not set ownership on ${bin_dir} — you may need to fix this manually."
 fi
 
-if chmod 0755 "$selected_script"; then
-    print_success "Permissions set to 0755 on ${selected_script}"
+if chmod 0755 "$install_path"; then
+    print_success "Permissions set to 0755 on ${install_path}"
 else
     print_error "Failed to set permissions on ${install_path}"
     exit 1
