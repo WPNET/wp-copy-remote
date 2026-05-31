@@ -1,6 +1,6 @@
 # WP Copy Remote
 
-> **Note:** This repository was formerly named `wp-push-remote`. The GitHub repository itself can be renamed to `wp-copy-remote` in **Settings → General → Repository name**.
+> **Note:** This repository was formerly named `wp-push-remote`.
 
 Bash scripts to push or pull WordPress sites between servers using WP-CLI and rsync. Works on Ubuntu 22.04 LTS and higher.
 
