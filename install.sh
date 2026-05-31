@@ -242,11 +242,11 @@ if [[ ! -d "$bin_dir" ]]; then
     fi
 fi
 
-if ! cp "$selected_script" "$install_path"; then
-    print_error "Failed to copy script to ${install_path}"
+if ! ln -sf "$selected_script" "$install_path"; then
+    print_error "Failed to create symlink at ${install_path}"
     exit 1
 fi
-print_success "Script copied to ${install_path}"
+print_success "Symlink created: ${install_path} -> ${selected_script}"
 
 # ── Step 6: Set ownership and permissions ────────────────────────────────────
 
@@ -258,8 +258,8 @@ else
     print_warning "Could not set ownership on ${bin_dir} — you may need to fix this manually."
 fi
 
-if chmod 0700 "$install_path"; then
-    print_success "Permissions set to 0700 on ${install_path}"
+if chmod 0755 "$selected_script"; then
+    print_success "Permissions set to 0755 on ${selected_script}"
 else
     print_error "Failed to set permissions on ${install_path}"
     exit 1
