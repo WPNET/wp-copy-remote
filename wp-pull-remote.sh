@@ -17,8 +17,8 @@ script_version="1.1.0"
 #               wp-cli.yml to be configured in the source and remote site owner's home directory, with the correct path to the WP installation
 # Target OS:    Ubuntu 22.04 LTS or higher
 
-# Suppress PHP constant-redefinition warnings from wp-config.php
-export WP_CLI_PHP_ARGS="-d error_reporting=E_ERROR"
+# Filter PHP constant-redefinition warnings from all WP-CLI output (local and remote via SSH)
+exec 2> >(grep -v "^PHP Warning:" >&2)
 
 ####################################################################################
 # COLOR DEFINITIONS FOR BETTER UX
@@ -1020,7 +1020,7 @@ fi
 if (( files_only == 0 && dry_run == 0 )); then
     # Export database on REMOTE server
     print_step "EXPORTING database on REMOTE (${remote_ip_address}) ..."
-    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "WP_CLI_PHP_ARGS='-d error_reporting=E_ERROR' wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
+    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
         print_success "Database exported on remote successfully"
     else
         print_error "Failed to export database on remote"
