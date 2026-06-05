@@ -261,8 +261,8 @@ else
     print_warning "Could not set ownership on ${bin_dir} — you may need to fix this manually."
 fi
 
-if chmod 0755 "$install_path"; then
-    print_success "Permissions set to 0755 on ${install_path}"
+if chmod 0700 "$install_path"; then
+    print_success "Permissions set to 0700 on ${install_path}"
 else
     print_error "Failed to set permissions on ${install_path}"
     exit 1
