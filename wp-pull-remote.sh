@@ -156,13 +156,17 @@ show_help() {
     echo -e "    ${COLOR_YELLOW}-c, --config${COLOR_RESET}                 Prompt for all configuration settings"
     echo -e "    ${COLOR_YELLOW}-D, --del-ssh-key${COLOR_RESET}            Delete SSH key pairs for remote user (skips pull operation)"
     echo -e "    ${COLOR_YELLOW}-f, --filter-sql${COLOR_RESET}             Filter SQL dump to remove privileged statements (slower import)"
+    echo -e "                                    ${COLOR_CYAN}Saved to conf.${COLOR_RESET} Remove filter_sql=1 from conf file to disable."
     echo ""
-    echo -e "    ${COLOR_YELLOW}-e, --exclude ${COLOR_RESET}LIST           Space-delimited list of paths to exclude (quote the list)"
+    echo -e "    ${COLOR_YELLOW}-e, --exclude ${COLOR_RESET}LIST           Space-delimited list of paths to exclude from rsync (quote the list)"
     echo -e "                                    Example: -e \"wp-content/plugins wp-content/themes/mytheme myfile.js\""
-    echo -e "    ${COLOR_YELLOW}-p, --install-plugins${COLOR_RESET} LIST   Space-delimited list of plugins to install locally"
+    echo -e "                                    ${COLOR_CYAN}Saved to conf.${COLOR_RESET} Edit conf_excludes in conf file to change."
+    echo -e "    ${COLOR_YELLOW}-p, --install-plugins${COLOR_RESET} LIST   Space-delimited list of plugins to install locally after pull"
     echo -e "                                    Example: --install-plugins \"woocommerce contact-form-7\""
-    echo -e "    ${COLOR_YELLOW}-r, --remote-cmds${COLOR_RESET} CMD        Run custom commands on local site after pull (quote the commands)"
-    echo -e "                                    Example: --remote-cmds \"wp theme install twentytwenty\""
+    echo -e "                                    ${COLOR_CYAN}Saved to conf.${COLOR_RESET} Edit plugins_to_install in conf file to change."
+    echo -e "    ${COLOR_YELLOW}-r, --remote-cmds${COLOR_RESET} CMD        Run custom commands on local site after pull (semicolon-delimited)"
+    echo -e "                                    Example: --remote-cmds \"wp cache flush;wp eval 'do_action(\"init\");'\""
+    echo -e "                                    ${COLOR_CYAN}Saved to conf.${COLOR_RESET} Remove remote_commands from conf file to disable."
     echo ""
     echo -e "    ${COLOR_BOLD_CYAN}Option Flags:${COLOR_RESET}"
     echo -e "    ${COLOR_YELLOW}--search-replace${COLOR_RESET}             Run wp search-replace (default: yes)"
@@ -176,6 +180,7 @@ show_help() {
     echo -e "    ${COLOR_YELLOW}--no-all-tables-with-prefix${COLOR_RESET}  Disable --all-tables-with-prefix for wp search-replace"
     echo -e "    ${COLOR_YELLOW}-n, --dry-run${COLOR_RESET}                Simulate the operation without making destructive changes"
     echo -e "    ${COLOR_YELLOW}--backup-db${COLOR_RESET}                  Backup the destination DB before importing (timestamped .sql file)"
+    echo -e "                                    ${COLOR_CYAN}Saved to conf.${COLOR_RESET} Remove backup_db=1 from conf file to disable."
     echo -e "    ${COLOR_YELLOW}--log${COLOR_RESET} FILE                   Write all output to FILE in addition to terminal"
     echo -e "    ${COLOR_YELLOW}-v, --version${COLOR_RESET}                Show version and exit"
     echo ""
@@ -207,6 +212,15 @@ show_help() {
     echo "    URLs and search-replace paths are auto-detected from your configuration."
     echo ""
     echo "    Use --config to configure or reconfigure settings interactively."
+    echo "    Existing conf values are loaded first, so only changed settings need re-entering."
+    echo ""
+    echo "    The following options are saved to the conf file and persist across all runs:"
+    echo "      -e / --exclude         → conf_excludes"
+    echo "      -p / --install-plugins → plugins_to_install"
+    echo "      -r / --remote-cmds     → remote_commands"
+    echo "      --backup-db            → backup_db"
+    echo "      -f / --filter-sql      → filter_sql"
+    echo "    Edit the conf file directly to remove or update any of these."
     echo ""
     exit 0
 }
@@ -277,6 +291,37 @@ remote_path_prefix="$remote_path_prefix"
 remote_webroot="$remote_webroot"
 local_url="$local_url"
 EOF
+    # Persist remote_commands if set (printf %q handles safe quoting for mixed-quote strings)
+    if [[ -n "$remote_commands" ]]; then
+        printf 'remote_commands=%q\n' "$remote_commands" >> "$config_file"
+    fi
+
+    # Persist site-specific excludes (items beyond the script's built-in defaults)
+    local _defaults=(.git .maintenance wp-content/cache wp-content/uploads/wp-migrate-db /wp-content/updraft)
+    local _extra=()
+    for _item in "${excludes[@]}"; do
+        local _is_def=0
+        for _def in "${_defaults[@]}"; do
+            [[ "$_item" == "$_def" ]] && _is_def=1 && break
+        done
+        [[ $_is_def -eq 0 ]] && _extra+=("$_item")
+    done
+    if [[ ${#_extra[@]} -gt 0 ]]; then
+        printf 'conf_excludes=(' >> "$config_file"
+        printf '%q ' "${_extra[@]}" >> "$config_file"
+        printf ')\n' >> "$config_file"
+    fi
+
+    # Persist plugins_to_install if set
+    if [[ -n "$plugins_to_install" ]]; then
+        printf 'plugins_to_install=%q\n' "$plugins_to_install" >> "$config_file"
+        printf 'install_plugins=1\n' >> "$config_file"
+    fi
+
+    # Persist boolean flags if enabled (non-default values only)
+    [[ $backup_db -eq 1 ]] && printf 'backup_db=1\n' >> "$config_file"
+    [[ $filter_sql -eq 1 ]] && printf 'filter_sql=1\n' >> "$config_file"
+
     chmod 600 "$config_file"
     print_success "Configuration saved to $config_file"
 }
@@ -364,6 +409,9 @@ derive_url_from_path() {
 excludes=(.git .maintenance wp-content/cache wp-content/uploads/wp-migrate-db /wp-content/updraft)
 # Or just add to the array like this:
 # excludes+=(.user.ini)
+
+# Site-specific extra excludes loaded from conf file (appended to excludes after load_config)
+conf_excludes=()
 
 ####################################################################################
 # NO MORE EDITING BELOW THIS LINE!
@@ -802,9 +850,12 @@ clear
 # Show banner
 print_header "WP Pull Remote v${script_version}"
 
-# Load saved configuration (unless prompting for new config)
-if [[ $prompt_config -eq 0 ]]; then
-    load_config
+# Load saved configuration (existing values are used as defaults in --config prompts)
+load_config
+
+# Append any site-specific excludes saved in conf to the main excludes array
+if [[ ${#conf_excludes[@]} -gt 0 ]]; then
+    excludes+=("${conf_excludes[@]}")
 fi
 
 # Prompt for configuration if requested
