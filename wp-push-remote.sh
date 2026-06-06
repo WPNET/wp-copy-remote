@@ -274,6 +274,10 @@ remote_user="$remote_user"
 remote_path_prefix="$remote_path_prefix"
 remote_webroot="$remote_webroot"
 EOF
+    # Persist remote_commands if set (printf %q handles safe quoting for mixed-quote strings)
+    if [[ -n "$remote_commands" ]]; then
+        printf 'remote_commands=%q\n' "$remote_commands" >> "$config_file"
+    fi
     chmod 600 "$config_file"
     print_success "Configuration saved to $config_file"
 }
