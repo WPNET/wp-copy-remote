@@ -408,6 +408,9 @@ excludes=(.git .maintenance wp-content/cache wp-content/uploads/wp-migrate-db /w
 # Or just add to the array like this:
 # excludes+=(.user.ini)
 
+# Site-specific extra excludes loaded from conf file (appended to excludes after load_config)
+conf_excludes=()
+
 ####################################################################################
 # NO MORE EDITING BELOW THIS LINE!
 ####################################################################################
