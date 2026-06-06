@@ -219,9 +219,10 @@ show_help() {
     echo "    Edit the conf file directly to remove or update any of these."
     echo ""
     echo "    remote_commands can only be set via the conf file (not a CLI flag)."
-    echo "    Set it as a semicolon-delimited list of commands to run locally after each pull."
-    echo "    Use single quotes within commands to avoid shell expansion issues. Example:"
-    echo "      remote_commands=\"wp cache flush;wp eval 'my_function();'\""
+    echo "    Set it as a newline-delimited list of commands to run locally after each pull."
+    echo "    Use single quotes within commands. Multiple commands: one per line. Example:"
+    echo "      remote_commands=\"wp cache flush"
+    echo "wp eval 'my_function();'\""
     echo ""
     exit 0
 }
@@ -1313,18 +1314,16 @@ fi
 
 if [[ -n "${remote_commands}" ]]; then
     echo -e "\n${COLOR_BLUE}EXECUTING post-pull commands locally ...${COLOR_RESET}"
-    # Run commands on local site - split by semicolon and process each one
-    IFS=';' read -ra CMD_ARRAY <<< "${remote_commands}"
-    for cmd in "${CMD_ARRAY[@]}"; do
-        # Trim leading/trailing whitespace
-        cmd=$(echo "$cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-        # If the command starts with 'wp' and doesn't contain --path, add it automatically
-        if [[ "$cmd" =~ ^wp[[:space:]] ]] && [[ ! "$cmd" =~ --path ]]; then
-            eval "$cmd --path=${source_path}"
+    # Split commands by newline (use one command per line in conf to avoid semicolon conflicts with PHP)
+    while IFS= read -r _cmd; do
+        _cmd=$(echo "$_cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+        [[ -z "$_cmd" ]] && continue
+        if [[ "$_cmd" =~ ^wp[[:space:]] ]] && [[ ! "$_cmd" =~ --path ]]; then
+            eval "$_cmd --path=${source_path}"
         else
-            eval "$cmd"
+            eval "$_cmd"
         fi
-    done
+    done <<< "${remote_commands}"
 fi
 
 if (( disable_wp_debug == 1 )); then

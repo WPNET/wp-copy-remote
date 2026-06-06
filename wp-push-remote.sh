@@ -218,9 +218,10 @@ show_help() {
     echo "    Edit the conf file directly to remove or update any of these."
     echo ""
     echo "    remote_commands can only be set via the conf file (not a CLI flag)."
-    echo "    Set it as a semicolon-delimited list of commands to run on the remote after each push."
-    echo "    Use single quotes within commands to avoid heredoc expansion issues. Example:"
-    echo "      remote_commands=\"wp cache flush;wp eval 'my_function();'\""
+    echo "    Set it as a newline-delimited list of commands to run on the remote after each push."
+    echo "    Use single quotes within commands. Multiple commands: one per line. Example:"
+    echo "      remote_commands=\"wp cache flush"
+    echo "wp eval 'my_function();'\""
     echo ""
     exit 0
 }
@@ -1308,23 +1309,16 @@ fi
 
 if [[ -n "${remote_commands}" ]]; then
 echo -e "\n${COLOR_BLUE}EXECUTING custom commands on remote ...${COLOR_RESET}"
-# Run custom commands passed via --remote-cmds
-# Split commands by semicolon and process each one
-IFS=';' read -ra CMD_ARRAY <<< "${remote_commands}"
-for cmd in "\${CMD_ARRAY[@]}"; do
-    # Trim leading/trailing whitespace
-    cmd=\$(echo "\$cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*\$//')
-    # If the command starts with 'wp' and doesn't contain --path, add it automatically
-    if [[ "\$cmd" =~ ^wp[[:space:]] ]] && [[ ! "\$cmd" =~ --path ]]; then
-        eval "\$cmd --path=${remote_path}"
+# Split commands by newline (use one command per line in conf to avoid semicolon conflicts with PHP)
+while IFS= read -r _cmd; do
+    _cmd=\$(echo "\$_cmd" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*\$//')
+    [[ -z "\$_cmd" ]] && continue
+    if [[ "\$_cmd" =~ ^wp[[:space:]] ]] && [[ ! "\$_cmd" =~ --path ]]; then
+        eval "\$_cmd --path=${remote_path}"
     else
-        eval "\$cmd"
+        eval "\$_cmd"
     fi
-done
-# Use for running custom commands on the remote, after DB import and search-replace, for example:
-# this runs a url_replace with Elementor
-#echo -e "\n${COLOR_BLUE}Running Elementor replace_urls on remote server ...${COLOR_RESET}"
-#wp elementor replace_urls https:${wp_search_replace_source_url} https:${wp_search_replace_remote_url} --path="${remote_path}"
+done <<< "${remote_commands}"
 fi
 
 if (( ${disable_wp_debug} == 1 )); then
