@@ -163,9 +163,6 @@ show_help() {
     echo -e "    ${COLOR_YELLOW}-p, --install-plugins${COLOR_RESET} LIST   Space-delimited list of plugins to install on remote after push"
     echo -e "                                    Example: --install-plugins \"woocommerce contact-form-7\""
     echo -e "                                    ${COLOR_CYAN}Saved to conf.${COLOR_RESET} Edit plugins_to_install in conf file to change."
-    echo -e "    ${COLOR_YELLOW}-r, --remote-cmds${COLOR_RESET} CMD        Run custom commands on remote after each push (semicolon-delimited)"
-    echo -e "                                    Example: --remote-cmds \"wp cache flush;wp eval 'do_action(\"init\");'\""
-    echo -e "                                    ${COLOR_CYAN}Saved to conf.${COLOR_RESET} Remove remote_commands from conf file to disable."
     echo ""
     echo -e "    ${COLOR_BOLD_CYAN}Option Flags:${COLOR_RESET}"
     echo -e "    ${COLOR_YELLOW}--search-replace${COLOR_RESET}             Run wp search-replace (default: yes)"
@@ -214,12 +211,16 @@ show_help() {
     echo "    Existing conf values are loaded first, so only changed settings need re-entering."
     echo ""
     echo "    The following options are saved to the conf file and persist across all runs:"
-    echo "      -e / --exclude       → conf_excludes"
+    echo "      -e / --exclude         → conf_excludes"
     echo "      -p / --install-plugins → plugins_to_install"
-    echo "      -r / --remote-cmds   → remote_commands"
-    echo "      --backup-db          → backup_db"
-    echo "      -f / --filter-sql    → filter_sql"
+    echo "      --backup-db            → backup_db"
+    echo "      -f / --filter-sql      → filter_sql"
     echo "    Edit the conf file directly to remove or update any of these."
+    echo ""
+    echo "    remote_commands can only be set via the conf file (not a CLI flag)."
+    echo "    Set it as a semicolon-delimited list of commands to run on the remote after each push."
+    echo "    Use single quotes within commands to avoid heredoc expansion issues. Example:"
+    echo "      remote_commands=\"wp cache flush;wp eval 'my_function();'\""
     echo ""
     exit 0
 }
@@ -288,11 +289,6 @@ remote_user="$remote_user"
 remote_path_prefix="$remote_path_prefix"
 remote_webroot="$remote_webroot"
 EOF
-    # Persist remote_commands if set (printf %q handles safe quoting for mixed-quote strings)
-    if [[ -n "$remote_commands" ]]; then
-        printf 'remote_commands=%q\n' "$remote_commands" >> "$config_file"
-    fi
-
     # Persist site-specific excludes (items beyond the script's built-in defaults)
     local _defaults=(.git .maintenance wp-content/cache wp-content/uploads/wp-migrate-db /wp-content/updraft)
     local _extra=()
@@ -611,7 +607,7 @@ function prompt_for_config() {
 ####################################################################################
 
 # Parse long options
-TEMP=$(getopt -o hucDfe:r:p:nv --long help,unattended,config,del-ssh-key,filter-sql,exclude:,search-replace,no-search-replace,files-only,no-db-import,install-plugins:,remote-cmds:,exclude-wpconfig,no-exclude-wpconfig,disable-wp-debug,all-tables-with-prefix,no-all-tables-with-prefix,dry-run,backup-db,log:,version -n "$0" -- "$@" 2>/dev/null)
+TEMP=$(getopt -o hucDfe:p:nv --long help,unattended,config,del-ssh-key,filter-sql,exclude:,search-replace,no-search-replace,files-only,no-db-import,install-plugins:,exclude-wpconfig,no-exclude-wpconfig,disable-wp-debug,all-tables-with-prefix,no-all-tables-with-prefix,dry-run,backup-db,log:,version -n "$0" -- "$@" 2>/dev/null)
 
 # Check for getopt errors
 if [[ $? -ne 0 ]]; then
@@ -670,14 +666,6 @@ if [[ $? -ne 0 ]]; then
                 fi
                 plugins_to_install="$2"
                 install_plugins=1
-                shift 2
-                ;;
-            -r|--remote-cmds)
-                if [[ -z "$2" ]]; then
-                    print_error "--remote-cmds requires a quoted string of commands"
-                    exit 1
-                fi
-                remote_commands="$2"
                 shift 2
                 ;;
             --exclude-wpconfig)
@@ -776,10 +764,6 @@ else
             -p|--install-plugins)
                 plugins_to_install="$2"
                 install_plugins=1
-                shift 2
-                ;;
-            -r|--remote-cmds)
-                remote_commands="$2"
                 shift 2
                 ;;
             --exclude-wpconfig)
