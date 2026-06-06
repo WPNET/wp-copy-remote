@@ -202,6 +202,21 @@ remote_commands="wp cache flush
 wp eval 'my_plugin_rebuild_cache();'"
 ```
 
+Common examples:
+
+```bash
+# Rebuild WPCode snippet cache (fixes broken PHP shortcodes after push)
+remote_commands="wp eval 'wpcode()->cache->cache_all_loaded_snippets();'"
+
+# Rebuild Elementor CSS cache (fixes styling issues after push)
+remote_commands="wp elementor flush-css"
+
+# Multiple commands (one per line)
+remote_commands="wp cache flush
+wp elementor flush-css
+wp eval 'wpcode()->cache->cache_all_loaded_snippets();'"
+```
+
 ### Default Exclusions
 
 `.git`, `.maintenance`, `wp-content/cache`, `wp-content/uploads/wp-migrate-db`, `/wp-content/updraft`, `wp-config.php`
