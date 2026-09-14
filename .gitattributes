@@ -1,0 +1,6 @@
+# LF is canonical for this repo on every platform, regardless of local git
+# config (core.autocrlf/core.eol) or which git client is used.
+* text=auto eol=lf
+
+# Scripts that must be LF to run on Linux servers.
+*.sh text eol=lf
