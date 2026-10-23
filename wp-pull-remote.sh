@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="1.1.0"
+script_version="1.1.1"
 # Author:       gb@wpnet.nz
 # Description:  Pull a site from REMOTE server to LOCAL (SOURCE). Run this script from the LOCAL server.
 # Requirements: WP-CLI installed on source (local) and remote servers
@@ -929,7 +929,7 @@ print_info "Script: 'wp-pull-remote.sh' v${script_version}"
 
 # Detect LOCAL (destination) URL before any operations - this is what we replace TO after import
 if [[ -f "${source_path}/wp-config.php" ]]; then
-    source_url=$(wp option get siteurl --path="${source_path}" 2>/dev/null || echo "")
+    source_url=$(wp option get siteurl --skip-plugins --skip-themes --path="${source_path}" 2>/dev/null | head -n1 | tr -d '\r\n' || echo "")
     # Prefer explicit local_url from config over DB-detected URL (DB may contain old remote URL after a prior import)
     if [[ -n "$local_url" ]]; then
         print_info "Local URL: ${local_url} (from config)"
@@ -1076,7 +1076,7 @@ fi
 if (( files_only == 0 && dry_run == 0 )); then
     # Export database on REMOTE server
     print_step "EXPORTING database on REMOTE (${remote_ip_address}) ..."
-    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --path='${remote_path}'"; then
+    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --skip-plugins --skip-themes --path='${remote_path}'"; then
         print_success "Database exported on remote successfully"
     else
         print_error "Failed to export database on remote"
@@ -1107,7 +1107,7 @@ fi
 if (( do_search_replace == 1 && files_only == 0 && no_db_import == 0 )); then
     if [[ -z "${wp_search_replace_remote_url}" ]]; then
         print_info "Detecting remote site URL for search-replace..."
-        wp_search_replace_remote_url=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp option get siteurl --path='${remote_path}' 2>/dev/null" | tr -d '\n')
+        wp_search_replace_remote_url=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp option get siteurl --skip-plugins --skip-themes --path='${remote_path}' 2>/dev/null" | head -n1 | tr -d '\r\n')
         if [[ -n "$wp_search_replace_remote_url" ]]; then
             print_info "Remote URL detected: ${wp_search_replace_remote_url}"
         else
@@ -1122,7 +1122,7 @@ if (( files_only == 0 && no_db_import == 0 )); then
     print_step "Checking table prefix compatibility ..."
     
     # Get remote table prefix (source of data being imported)
-    remote_table_prefix=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db prefix --path='${remote_path}' 2>/dev/null" | tr -d '\n')
+    remote_table_prefix=$(ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db prefix --skip-plugins --skip-themes --path='${remote_path}' 2>/dev/null" | head -n1 | tr -d '\r\n')
     if [[ -z "$remote_table_prefix" ]]; then
         print_warning "Unable to detect remote table prefix"
     else
@@ -1130,7 +1130,7 @@ if (( files_only == 0 && no_db_import == 0 )); then
     fi
     
     # Get local table prefix using wp-cli
-    source_table_prefix=$(wp db prefix --path="${source_path}" 2>/dev/null | tr -d '\n')
+    source_table_prefix=$(wp db prefix --skip-plugins --skip-themes --path="${source_path}" 2>/dev/null | head -n1 | tr -d '\r\n')
     if [[ -z "$source_table_prefix" ]]; then
         print_warning "Unable to detect local table prefix"
     else
@@ -1147,8 +1147,8 @@ if (( files_only == 0 && no_db_import == 0 )); then
         if (( unattended_mode == 0 )); then
             if ( user_prompt "Synchronize local table prefix to match remote?" ); then
                 print_step "Resetting local database and updating table prefix ..."
-                wp db reset --yes --path="${source_path}"
-                wp config set table_prefix "${remote_table_prefix}" --path="${source_path}"
+                wp db reset --yes --skip-plugins --skip-themes --path="${source_path}"
+                wp config set table_prefix "${remote_table_prefix}" --skip-plugins --skip-themes --path="${source_path}"
                 if [[ $? -eq 0 ]]; then
                     print_success "Local table prefix synchronized to: ${remote_table_prefix}"
                 else
@@ -1262,7 +1262,7 @@ if (( files_only == 0 && no_db_import == 0 )); then
     if (( backup_db == 1 && dry_run == 0 )); then
         local_backup="${source_path}/wp-db-backup-$(date +%Y%m%d-%H%M%S).sql"
         print_step "BACKING UP existing local database before import ..."
-        if wp db export "${local_backup}" --path="${source_path}"; then
+        if wp db export "${local_backup}" --skip-plugins --skip-themes --path="${source_path}"; then
             print_success "Local DB backed up to: ${local_backup}"
         else
             print_warning "Local DB backup failed - continuing anyway"
@@ -1272,7 +1272,7 @@ if (( files_only == 0 && no_db_import == 0 )); then
     fi
 
     echo -e "\n${COLOR_BLUE}IMPORTING database locally ...${COLOR_RESET}"
-    if wp db import ${source_path}/${source_db_name} --path="${source_path}"; then
+    if wp db import ${source_path}/${source_db_name} --skip-plugins --skip-themes --path="${source_path}"; then
         echo -e "${COLOR_GREEN}Database imported successfully${COLOR_RESET}"
     else
         echo -e "${COLOR_RED}[ERROR] Database import failed${COLOR_RESET}"
@@ -1289,10 +1289,11 @@ if (( do_search_replace == 1 && files_only == 0 && no_db_import == 0 )); then
         echo -e "\n${COLOR_BLUE}EXECUTING 'wp search-replace' for URLs ...${COLOR_RESET}"
         echo "Replacing: ${wp_search_replace_remote_url} -> ${wp_search_replace_source_url}"
         if (( all_tables_with_prefix == 1 )); then
-            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_url}" "${wp_search_replace_source_url}" --report-changed-only --format=count --all-tables-with-prefix --path="${source_path}")
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_url}" "${wp_search_replace_source_url}" --report-changed-only --format=count --all-tables-with-prefix --skip-plugins --skip-themes --path="${source_path}" | tail -n1)
         else
-            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_url}" "${wp_search_replace_source_url}" --report-changed-only --format=count --path="${source_path}")
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_url}" "${wp_search_replace_source_url}" --report-changed-only --format=count --skip-plugins --skip-themes --path="${source_path}" | tail -n1)
         fi
+        [[ "${replacement_count}" =~ ^[0-9]+$ ]] || replacement_count="unknown (check output above)"
         echo "Total replacements made: ${replacement_count}"
     else
         echo -e "${COLOR_YELLOW}[WARNING] Skipping URL search-replace - local or remote URL not available${COLOR_RESET}"
@@ -1303,10 +1304,11 @@ if (( do_search_replace == 1 && files_only == 0 && no_db_import == 0 )); then
         echo -e "\n${COLOR_BLUE}EXECUTING 'wp search-replace' for file PATHs ...${COLOR_RESET}"
         echo "Replacing: ${wp_search_replace_remote_path} -> ${wp_search_replace_source_path}"
         if (( all_tables_with_prefix == 1 )); then
-            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_path}" "${wp_search_replace_source_path}" --report-changed-only --format=count --all-tables-with-prefix --path="${source_path}")
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_path}" "${wp_search_replace_source_path}" --report-changed-only --format=count --all-tables-with-prefix --skip-plugins --skip-themes --path="${source_path}" | tail -n1)
         else
-            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_path}" "${wp_search_replace_source_path}" --report-changed-only --format=count --path="${source_path}")
+            replacement_count=$(wp search-replace --precise "${wp_search_replace_remote_path}" "${wp_search_replace_source_path}" --report-changed-only --format=count --skip-plugins --skip-themes --path="${source_path}" | tail -n1)
         fi
+        [[ "${replacement_count}" =~ ^[0-9]+$ ]] || replacement_count="unknown (check output above)"
         echo "Total replacements made: ${replacement_count}"
     else
         echo -e "${COLOR_YELLOW}[WARNING] Skipping path search-replace - local or remote path not available${COLOR_RESET}"
@@ -1316,7 +1318,7 @@ fi
 # Flush cache once after all database operations
 if (( files_only == 0 && no_db_import == 0 )); then
     echo -e "${COLOR_BLUE}FLUSHING WP cache locally ...${COLOR_RESET}"
-    wp cache flush --hard --path="${source_path}"
+    wp cache flush --hard --skip-plugins --skip-themes --path="${source_path}"
 fi
 
 if (( install_plugins == 1 )) && [[ -n "${plugins_to_install}" ]]; then
