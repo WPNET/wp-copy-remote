@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="1.1.2"
+script_version="1.1.3"
 # Author:       gb@wpnet.nz
 # Description:  Pull a site from REMOTE server to LOCAL (SOURCE). Run this script from the LOCAL server.
 # Requirements: WP-CLI installed on source (local) and remote servers
@@ -1076,7 +1076,7 @@ fi
 if (( files_only == 0 && dry_run == 0 )); then
     # Export database on REMOTE server
     print_step "EXPORTING database on REMOTE (${remote_ip_address}) ..."
-    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --skip-plugins --skip-themes --path='${remote_path}'"; then
+    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --single-transaction --skip-plugins --skip-themes --path='${remote_path}'"; then
         print_success "Database exported on remote successfully"
     else
         print_error "Failed to export database on remote"
@@ -1262,7 +1262,7 @@ if (( files_only == 0 && no_db_import == 0 )); then
     if (( backup_db == 1 && dry_run == 0 )); then
         local_backup="${source_path}/wp-db-backup-$(date +%Y%m%d-%H%M%S).sql"
         print_step "BACKING UP existing local database before import ..."
-        if wp db export "${local_backup}" --skip-plugins --skip-themes --path="${source_path}"; then
+        if wp db export "${local_backup}" --single-transaction --skip-plugins --skip-themes --path="${source_path}"; then
             print_success "Local DB backed up to: ${local_backup}"
         else
             print_warning "Local DB backup failed - continuing anyway"

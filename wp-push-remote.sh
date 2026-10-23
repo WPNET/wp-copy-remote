@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="2.3.2"
+script_version="2.3.3"
 # Author:       gb@wpnet.nz
 # Description:  Push a site from SOURCE server to REMOTE. Run this script from the SOURCE server.
 # Requirements: WP-CLI installed on source and remote
@@ -1068,7 +1068,7 @@ then
         # Filter while exporting in a single pass (faster than rewriting the file multiple times).
         # If streaming filter fails for any reason, fall back to the legacy export+sed filter path.
         print_info "Exporting and filtering SQL in a single pass..."
-        if ( set -o pipefail; wp db export - --skip-plugins --skip-themes --path="${source_path}" | LC_ALL=C awk '
+        if ( set -o pipefail; wp db export - --single-transaction --skip-plugins --skip-themes --path="${source_path}" | LC_ALL=C awk '
             BEGIN {
                 in_gtid_block = 0
                 kept_lines = 0
@@ -1117,7 +1117,7 @@ then
             print_success "Database exported and filtered successfully"
         else
             print_warning "Single-pass filter failed - falling back to legacy filtering path"
-            if wp db export ${source_path}/${source_db_name} --skip-plugins --skip-themes --path="${source_path}"; then
+            if wp db export ${source_path}/${source_db_name} --single-transaction --skip-plugins --skip-themes --path="${source_path}"; then
                 print_info "Filtering SQL file to remove privileged statements..."
                 sed -i -E \
                     '/^[[:space:]]*[Ss][Ee][Tt][[:space:]]*@@[Gg][Ll][Oo][Bb][Aa][Ll]\.[Gg][Tt][Ii][Dd]_[Pp][Uu][Rr][Gg][Ee][Dd]/,/;[[:space:]]*$/d' \
@@ -1144,7 +1144,7 @@ then
             fi
         fi
     else
-        if wp db export ${source_path}/${source_db_name} --skip-plugins --skip-themes --path="${source_path}"; then
+        if wp db export ${source_path}/${source_db_name} --single-transaction --skip-plugins --skip-themes --path="${source_path}"; then
             print_success "Database exported successfully"
             print_info "Skipping SQL filtering (use -f or --filter-sql to enable)"
         else
@@ -1256,7 +1256,7 @@ fi
 if (( ${backup_db} == 1 && ${files_only} == 0 && ${no_db_import} == 0 && ${dry_run} == 0 )); then
 echo -e "\n${COLOR_BLUE}BACKING UP existing remote database before import ...${COLOR_RESET}"
 backup_file="${remote_path}/wp-db-backup-$(date +%Y%m%d-%H%M%S).sql"
-if wp db export "\${backup_file}" --skip-plugins --skip-themes --path="${remote_path}"; then
+if wp db export "\${backup_file}" --single-transaction --skip-plugins --skip-themes --path="${remote_path}"; then
     echo -e "${COLOR_GREEN}Remote DB backed up to: \${backup_file}${COLOR_RESET}"
 else
     echo -e "${COLOR_YELLOW}[WARNING] Remote DB backup failed - continuing anyway${COLOR_RESET}"
