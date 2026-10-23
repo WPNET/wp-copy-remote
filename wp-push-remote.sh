@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="2.3.1"
+script_version="2.3.2"
 # Author:       gb@wpnet.nz
 # Description:  Push a site from SOURCE server to REMOTE. Run this script from the SOURCE server.
 # Requirements: WP-CLI installed on source and remote
@@ -1068,7 +1068,7 @@ then
         # Filter while exporting in a single pass (faster than rewriting the file multiple times).
         # If streaming filter fails for any reason, fall back to the legacy export+sed filter path.
         print_info "Exporting and filtering SQL in a single pass..."
-        if ( set -o pipefail; wp db export - --skip-plugins --skip-themes --path="${source_path}" | awk '
+        if ( set -o pipefail; wp db export - --skip-plugins --skip-themes --path="${source_path}" | LC_ALL=C awk '
             BEGIN {
                 in_gtid_block = 0
                 kept_lines = 0

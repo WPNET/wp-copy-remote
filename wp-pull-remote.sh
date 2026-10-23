@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="1.1.1"
+script_version="1.1.2"
 # Author:       gb@wpnet.nz
 # Description:  Pull a site from REMOTE server to LOCAL (SOURCE). Run this script from the LOCAL server.
 # Requirements: WP-CLI installed on source (local) and remote servers
@@ -1187,7 +1187,7 @@ if (( files_only == 0 && no_db_import == 0 )); then
         fi
         print_info "Filtering SQL file to remove privileged statements..."
         local_filtered="${source_path}/${source_db_name}.filtered"
-        if awk '
+        if LC_ALL=C awk '
             BEGIN {
                 in_gtid_block = 0
                 kept_lines = 0
