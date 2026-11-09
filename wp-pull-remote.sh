@@ -415,6 +415,8 @@ conf_excludes=()
 # NO MORE EDITING BELOW THIS LINE!
 ####################################################################################
 
+remote_export_attempted=0
+
 # Cleanup function for script interruption
 cleanup_on_exit() {
     local exit_code=$?
@@ -428,7 +430,8 @@ cleanup_on_exit() {
             fi
         fi
         # Clean up database export from remote server if it was created
-        if [[ -n "${ssh_key_path}" ]] && [[ -n "${remote_user}" ]] && [[ -n "${remote_ip_address}" ]] && \
+        if [[ ${remote_export_attempted:-0} -eq 1 ]] && \
+           [[ -n "${ssh_key_path}" ]] && [[ -n "${remote_user}" ]] && [[ -n "${remote_ip_address}" ]] && \
            [[ -n "${remote_path}" ]] && [[ -n "${db_export_prefix}" ]] && [[ -n "${rnd_str_key}" ]]; then
             print_info "Attempting to clean up database export from remote server..."
             ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS:-} ${remote_user}@${remote_ip_address} \
@@ -438,7 +441,9 @@ cleanup_on_exit() {
 }
 
 # Set trap for cleanup
-trap 'release_lock; cleanup_on_exit' EXIT INT TERM
+trap 'cleanup_on_exit; release_lock' EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Validate configuration
 validate_config() {
@@ -565,6 +570,71 @@ function user_prompt_default_no() {
         print_info "CONFIRM: ${1} - Assuming NO in unattended mode."
         return 1
     fi
+}
+
+show_ssh_key_instructions() {
+    print_info "Remote SSH user: ${remote_user}@${remote_ip_address}"
+    print_info "Local public key: ${ssh_key_path}.pub"
+    if ! cat "${ssh_key_path}.pub"; then
+        print_error "Unable to read public key: ${ssh_key_path}.pub"
+        print_info "Locate the matching public key before retrying; do not copy the private key."
+        return 1
+    fi
+    echo ""
+    print_info "In a separate terminal, append this complete public key as ONE line to"
+    print_info "~/.ssh/authorized_keys for remote user '${remote_user}'. Do not overwrite existing keys."
+    print_info "Ensure .ssh and authorized_keys belong to that user, with permissions 700 and 600 respectively."
+}
+
+cancel_ssh_setup() {
+    print_warning "SSH setup cancelled. No pull/push operation has started."
+    print_info "Any saved configuration and SSH keys have been kept. Rerun the same command when ready."
+    return 1
+}
+
+wait_for_ssh_key_install() {
+    local reply
+    while true; do
+        if ! read -r -p "After adding the key, press Enter to test SSH, or type q to cancel: " reply; then
+            print_warning "Input closed before SSH setup was completed."
+            cancel_ssh_setup
+            return 1
+        fi
+        case "$reply" in
+            "") return 0 ;;
+            [Qq]) cancel_ssh_setup; return 1 ;;
+            *) print_warning "Press Enter to test SSH, or type q to cancel." ;;
+        esac
+    done
+}
+
+verify_ssh_connection() {
+    local reply ssh_output
+    print_step "Testing SSH connection to ${remote_user}@${remote_ip_address} ..."
+    print_info "Connection timeout: 15s"
+    while true; do
+        if ssh_output=$(ssh -T -i "${ssh_key_path}" ${SSH_OPTS} "${remote_user}@${remote_ip_address}" "echo 'SSH OK'" 2>&1); then
+            print_success "SSH connection verified"
+            return 0
+        fi
+        print_error "SSH connection failed to ${remote_user}@${remote_ip_address}"
+        [[ -n "$ssh_output" ]] && printf '%s\n' "$ssh_output"
+        print_info "Selected key: ${ssh_key_path}"
+        print_info "Check the remote user/host, authorized_keys, file ownership/permissions, and network access."
+        while true; do
+            if ! read -r -p "[Enter/r] Retry SSH test  [k] Show public key and installation instructions  [q] Cancel: " reply; then
+                print_warning "Input closed before SSH setup was completed."
+                cancel_ssh_setup
+                return 1
+            fi
+            case "$reply" in
+                ""|[Rr]) break ;;
+                [Kk]) show_ssh_key_instructions || continue ;;
+                [Qq]) cancel_ssh_setup; return 1 ;;
+                *) print_warning "Press Enter or r to retry, k to show the public key, or q to cancel." ;;
+            esac
+        done
+    done
 }
 
 # Function to prompt for configuration
@@ -1004,9 +1074,8 @@ if [[ -z "$ssh_key_path" ]]; then
                 chmod 644 ~/.ssh/id_ed25519_remote_${remote_user}.pub
                 ssh_key_path=~/.ssh/id_ed25519_remote_${remote_user}
                 print_success "SSH key generated: ${ssh_key_path}"
-                echo -e "\n${COLOR_BOLD_YELLOW}Public key:${COLOR_RESET}\n"
-                cat ${ssh_key_path}.pub
-                echo -e "\n\n${COLOR_BOLD_YELLOW}IMPORTANT:${COLOR_RESET} Add this key to the REMOTE server's authorized_keys file for user '${remote_user}'"
+                show_ssh_key_instructions || { cancel_ssh_setup; exit 1; }
+                wait_for_ssh_key_install || exit 1
             else
                 print_error "Failed to generate SSH key"
                 exit 1
@@ -1024,18 +1093,7 @@ if [[ -z "$ssh_key_path" ]]; then
 fi
 
 if [[ $unattended_mode -eq 0 ]]; then
-    print_step "Testing SSH connection to ${remote_user}@${remote_ip_address} ..."
-    print_info "If this hangs, check SSH key setup. Timeout: 15s"
-    if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "echo 'SSH OK'" >/dev/null 2>&1; then
-        print_success "SSH connection verified"
-    else
-        print_error "SSH connection failed to ${remote_user}@${remote_ip_address}"
-        print_info "Check: key at ${ssh_key_path}, remote authorized_keys for user '${remote_user}'"
-        if ! ( user_prompt "SSH test failed - proceed anyway?" ); then
-            print_error "ABORTED!"
-            exit 1
-        fi
-    fi
+    verify_ssh_connection || exit 1
 else
     print_info "Skipping SSH connection test in unattended mode."
 fi
@@ -1076,6 +1134,7 @@ fi
 if (( files_only == 0 && dry_run == 0 )); then
     # Export database on REMOTE server
     print_step "EXPORTING database on REMOTE (${remote_ip_address}) ..."
+    remote_export_attempted=1
     if ssh -q -T -i "${ssh_key_path}" ${SSH_OPTS} ${remote_user}@${remote_ip_address} "wp db export ${remote_path}/${source_db_name} --skip-plugins --skip-themes --path='${remote_path}'"; then
         print_success "Database exported on remote successfully"
     else

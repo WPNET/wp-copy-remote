@@ -165,6 +165,8 @@ Options marked `[saved to conf]` are persisted to the conf file and automaticall
 
 Run `--config` once to save connection settings. Existing conf values are shown as defaults, so re-running `--config` only requires updating what has changed.
 
+After saving settings, the script sets up and verifies SSH access as described below, then separately asks whether to start the pull or push. `--config` is not a configuration-only mode.
+
 Fields prompted:
 
 | Field | Example |
@@ -223,7 +225,17 @@ wp eval 'wpcode()->cache->cache_all_loaded_snippets();'"
 
 ## SSH Key Management
 
-SSH keys are generated automatically on first run (Ed25519). To delete them:
+On an interactive run without an existing key, the script offers to generate an Ed25519 key. It displays the public key and **waits before testing SSH**:
+
+1. In a separate terminal/session, append the complete public key as one line to the remote SSH user's `~/.ssh/authorized_keys`. Do not overwrite existing keys. The directory and file must belong to that user; use permissions `700` for `.ssh` and `600` for `authorized_keys`.
+2. Return to the script and press **Enter** to test, or type **q** to cancel.
+3. If the test fails, review the SSH error and choose **Enter/r** to retry, **k** to show the public key and instructions again, or **q** to cancel. You can fix access in the other terminal and retry without restarting.
+
+Existing keys are tested immediately. Both scripts require a successful interactive SSH test before continuing; there is no "proceed anyway" option. SSH verification is followed by a separate confirmation before any pull/push operation starts.
+
+This flow applies to `--config` and normal interactive runs. Cancelling keeps saved configuration and generated keys, so rerun the same command when ready. Closed input also cancels setup rather than proceeding. Unattended mode (`-u`) is unchanged: it does not generate keys, pause, or run this connection test; configure working SSH access beforehand.
+
+To delete generated keys:
 
 ```bash
 ./.local/bin/wp-push-remote --del-ssh-key
@@ -234,6 +246,8 @@ SSH keys are generated automatically on first run (Ed25519). To delete them:
 ## Troubleshooting
 
 **SSH password prompt**: Add the public key to `~/.ssh/authorized_keys` on the remote server.
+
+**SSH verification failed**: Check the displayed SSH error, remote hostname/user, key authorization, file ownership/permissions, and network access. Correct the issue in another terminal, then press Enter to retry; use `k` to redisplay the public key.
 
 **WP-CLI not found**: Install from [wp-cli.org](https://wp-cli.org/#installing).
 
