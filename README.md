@@ -161,6 +161,20 @@ Options marked `[saved to conf]` are persisted to the conf file and automaticall
 6. Run `remote_commands` if set in conf
 7. Cleanup temp files on remote and local
 
+### Pull file ownership
+
+Pulls use the existing local destination webroot's owner and group for all synced
+files and directories, including the webroot itself. For example, if `~/files`
+is owned by `production:production`, remote files with group `site-users` are
+synced as `production:production`. The script must run as the destination
+webroot owner; an ownership lookup failure or a different running user aborts
+the pull before the remote database export.
+
+Ensure the destination webroot has the correct ownership before pulling. If a
+previous pull changed it, first use SpinupWP's correct file permissions function.
+Excluded files are not changed. Source permission modes are still preserved.
+This ownership handling applies to the pull script only.
+
 ## Configuration
 
 Run `--config` once to save connection settings. Existing conf values are shown as defaults, so re-running `--config` only requires updating what has changed.

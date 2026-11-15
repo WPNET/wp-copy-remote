@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="1.1.4"
+script_version="1.1.5"
 # Author:       gb@wpnet.nz
 # Description:  Pull a site from REMOTE server to LOCAL (SOURCE). Run this script from the LOCAL server.
 # Requirements: WP-CLI installed on source (local) and remote servers
@@ -1127,6 +1127,17 @@ print_header "STARTING PULL OPERATION"
 # Record start time
 start_time=$(date +%s)
 
+# Use the destination webroot's ownership, not the remote site's user/group.
+if ! destination_ownership=$(stat -L -c '%u:%g' -- "${source_path}"); then
+    print_error "Cannot determine destination ownership: ${source_path}"
+    exit 1
+fi
+if [[ "${destination_ownership%%:*}" -ne "$EUID" ]]; then
+    print_error "Run this script as the destination webroot owner (UID ${destination_ownership%%:*}), not UID ${EUID}."
+    exit 1
+fi
+print_info "Destination file ownership: ${destination_ownership} (UID:GID)"
+
 if (( files_only == 0 && dry_run == 1 )); then
     print_info "[DRY-RUN] Would export remote database at ${remote_path}/${source_db_name}"
 fi
@@ -1154,7 +1165,7 @@ print_step "RSYNC-ing files FROM REMOTE to LOCAL ..."
 # run rsync with exclusions (direction reversed: remote -> local)
 rsync_dry_flag=""
 (( dry_run == 1 )) && rsync_dry_flag="--dry-run"
-if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${remote_user}@${remote_ip_address}:${remote_path}/ ${source_path}/; then
+if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --chown="${destination_ownership}" --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${remote_user}@${remote_ip_address}:${remote_path}/ ${source_path}/; then
     print_success "Files synced successfully"
 else
     print_error "Rsync failed"
