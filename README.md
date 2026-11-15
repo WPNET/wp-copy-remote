@@ -161,19 +161,21 @@ Options marked `[saved to conf]` are persisted to the conf file and automaticall
 6. Run `remote_commands` if set in conf
 7. Cleanup temp files on remote and local
 
-### Pull file ownership
+### Destination file ownership
 
-Pulls use the existing local destination webroot's owner and group for all synced
-files and directories, including the webroot itself. For example, if `~/files`
-is owned by `production:production`, remote files with group `site-users` are
-synced as `production:production`. The script must run as the destination
-webroot owner; an ownership lookup failure or a different running user aborts
-the pull before the remote database export.
+Both scripts use the existing destination webroot's owner and group for all synced
+files and directories, including the webroot itself. For example, if the destination
+`~/files` is owned by `production:production`, source files with group `site-users`
+are synced as `production:production`.
 
-Ensure the destination webroot has the correct ownership before pulling. If a
-previous pull changed it, first use SpinupWP's correct file permissions function.
+For pulls, the script must run as the local destination webroot owner. For pushes,
+the remote SSH user must be the remote destination webroot owner; ownership is
+resolved on that server, not the local source. An ownership lookup failure or a
+different receiving user aborts before the database export.
+
+Ensure the destination webroot has the correct ownership before syncing. If a
+previous sync changed it, first use SpinupWP's correct file permissions function.
 Excluded files are not changed. Source permission modes are still preserved.
-This ownership handling applies to the pull script only.
 
 ## Configuration
 

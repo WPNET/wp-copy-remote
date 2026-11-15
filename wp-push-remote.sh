@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="2.3.4"
+script_version="2.3.5"
 # Author:       gb@wpnet.nz
 # Description:  Push a site from SOURCE server to REMOTE. Run this script from the SOURCE server.
 # Requirements: WP-CLI installed on source and remote
@@ -1111,6 +1111,25 @@ print_header "STARTING PUSH OPERATION"
 # Record start time
 start_time=$(date +%s)
 
+# Resolve ownership on the receiving server, where the UID/GID will be applied.
+read -r -a destination_ssh_opts <<< "$SSH_OPTS"
+if ! destination_ownership=$(ssh -q -T -i "${ssh_key_path}" "${destination_ssh_opts[@]}" "${remote_user}@${remote_ip_address}" "
+    ownership=\$(stat -L -c '%u:%g' -- '${remote_path}') || exit 1
+    if [ \"\${ownership%%:*}\" != \"\$(id -u)\" ]; then
+        echo 'Remote SSH user must be the destination webroot owner.' >&2
+        exit 1
+    fi
+    printf '%s\n' \"\$ownership\"
+"); then
+    print_error "Cannot verify destination ownership on ${remote_ip_address}:${remote_path}"
+    exit 1
+fi
+if [[ ! "${destination_ownership}" =~ ^[0-9]+:[0-9]+$ ]]; then
+    print_error "Invalid destination ownership response: ${destination_ownership}"
+    exit 1
+fi
+print_info "Destination file ownership: ${destination_ownership} (remote UID:GID)"
+
 if (( files_only == 0 && dry_run == 1 )); then
     print_info "[DRY-RUN] Would export local database to ${source_path}/${source_db_name}"
 fi
@@ -1220,7 +1239,7 @@ print_step "RSYNC-ing files to REMOTE ..."
 # run rsync with exclusions
 rsync_dry_flag=""
 (( dry_run == 1 )) && rsync_dry_flag="--dry-run"
-if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${source_path}/ ${remote_user}@${remote_ip_address}:${remote_path}; then
+if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --chown="${destination_ownership}" --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${source_path}/ ${remote_user}@${remote_ip_address}:${remote_path}; then
     print_success "Files synced successfully"
 else
     print_error "Rsync failed"
