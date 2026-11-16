@@ -10,7 +10,7 @@ if ((BASH_VERSINFO[0] < 5)); then
     exit 1
 fi
 
-script_version="1.1.5"
+script_version="1.1.6"
 # Author:       gb@wpnet.nz
 # Description:  Pull a site from REMOTE server to LOCAL (SOURCE). Run this script from the LOCAL server.
 # Requirements: WP-CLI installed on source (local) and remote servers
@@ -1163,9 +1163,10 @@ fi
 print_step "RSYNC-ing files FROM REMOTE to LOCAL ..."
 
 # run rsync with exclusions (direction reversed: remote -> local)
+# --no-perms --chmod=ugo=rwX: keep existing destination modes; new files get destination-default (umask) modes
 rsync_dry_flag=""
 (( dry_run == 1 )) && rsync_dry_flag="--dry-run"
-if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --chown="${destination_ownership}" --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${remote_user}@${remote_ip_address}:${remote_path}/ ${source_path}/; then
+if rsync -e "ssh -i \"${ssh_key_path}\" ${SSH_OPTS}" -azhP --no-perms --chmod=ugo=rwX --chown="${destination_ownership}" --delete ${rsync_dry_flag} $(printf -- "--exclude=%q " "${excludes[@]}") ${remote_user}@${remote_ip_address}:${remote_path}/ ${source_path}/; then
     print_success "Files synced successfully"
 else
     print_error "Rsync failed"

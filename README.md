@@ -161,7 +161,7 @@ Options marked `[saved to conf]` are persisted to the conf file and automaticall
 6. Run `remote_commands` if set in conf
 7. Cleanup temp files on remote and local
 
-### Destination file ownership
+### Destination file ownership and permissions
 
 Both scripts use the existing destination webroot's owner and group for all synced
 files and directories, including the webroot itself. For example, if the destination
@@ -175,7 +175,13 @@ different receiving user aborts before the database export.
 
 Ensure the destination webroot has the correct ownership before syncing. If a
 previous sync changed it, first use SpinupWP's correct file permissions function.
-Excluded files are not changed. Source permission modes are still preserved.
+Excluded files are not changed.
+
+Source permission modes are not copied. Existing destination files and directories
+(including the webroot itself) keep their current modes, so a restrictive source
+mode such as `770` on the webroot cannot block the web server. New files and
+directories get the destination's default modes from its umask (typically `644`
+and `755`).
 
 ## Configuration
 
