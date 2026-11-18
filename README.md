@@ -78,6 +78,12 @@ Both scripts use the same options and flags. Configuration is stored separately:
 - Push: `~/.wp-push-remote.conf`
 - Pull: `~/.wp-pull-remote.conf`
 
+Both configurations use `local_path_prefix` and `local_webroot` for the local site,
+and `remote_path_prefix` and `remote_webroot` for the remote site. The local site
+is the source for a push and the destination for a pull. Older configurations
+using `source_path_prefix` and `source_webroot` remain supported and are rewritten
+with the `local_*` names when saved.
+
 ## Command-Line Options
 
 ```

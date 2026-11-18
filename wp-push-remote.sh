@@ -233,9 +233,9 @@ show_help() {
 # Configuration file location
 config_file="${HOME}/.wp-push-remote.conf"
 
-# SOURCE
-source_path_prefix="" # use trailing slash
-source_webroot="files" # no preceding or trailing slash
+# LOCAL (source of push)
+local_path_prefix="" # use trailing slash
+unset local_webroot source_path_prefix source_webroot # local webroot has no preceding or trailing slash
 
 # REMOTE
 remote_ip_address=""
@@ -276,6 +276,10 @@ load_config() {
         print_info "Loading saved configuration from $config_file"
         source "$config_file"
     fi
+
+    # Keep configurations created before the local_* keys were introduced working.
+    local_path_prefix="${local_path_prefix:-${source_path_prefix:-}}"
+    local_webroot="${local_webroot-${source_webroot-files}}"
 }
 
 # Save configuration to file
@@ -284,8 +288,8 @@ save_config() {
 # WP Push Remote Configuration
 # Generated on $(date)
 
-source_path_prefix="$source_path_prefix"
-source_webroot="$source_webroot"
+local_path_prefix="$local_path_prefix"
+local_webroot="$local_webroot"
 remote_ip_address="$remote_ip_address"
 remote_user="$remote_user"
 remote_path_prefix="$remote_path_prefix"
@@ -483,8 +487,8 @@ validate_config() {
         errors=$((errors + 1))
     fi
     
-    if [[ -z "$source_path_prefix" ]]; then
-        print_error "Source path prefix is not set!"
+    if [[ -z "$local_path_prefix" ]]; then
+        print_error "Local path prefix is not set!"
         errors=$((errors + 1))
     fi
     
@@ -503,12 +507,12 @@ validate_config() {
 # Normalize paths to ensure trailing slashes where needed
 normalize_paths() {
     # Add trailing slash if not present
-    [[ "$source_path_prefix" != */ ]] && source_path_prefix="${source_path_prefix}/"
+    [[ "$local_path_prefix" != */ ]] && local_path_prefix="${local_path_prefix}/"
     [[ "$remote_path_prefix" != */ ]] && remote_path_prefix="${remote_path_prefix}/"
     
     # Remove leading/trailing slashes from webroot
-    source_webroot="${source_webroot#/}"
-    source_webroot="${source_webroot%/}"
+    local_webroot="${local_webroot#/}"
+    local_webroot="${local_webroot%/}"
     remote_webroot="${remote_webroot#/}"
     remote_webroot="${remote_webroot%/}"
 }
@@ -629,30 +633,30 @@ verify_ssh_connection() {
 function prompt_for_config() {
     print_header "CONFIGURATION SETUP"
     
-    print_info "Let's configure the SOURCE and REMOTE settings."
+    print_info "Let's configure the LOCAL (source) and REMOTE (destination) settings."
     print_info "Press Enter to accept defaults shown in [brackets]"
     echo ""
     
-    # SOURCE configuration
-    print_step "SOURCE Configuration"
+    # LOCAL configuration
+    print_step "LOCAL Configuration (source of push)"
     
     # Detect current domain from hostname or use saved value
     local current_domain=$(hostname -f 2>/dev/null || hostname)
-    local default_source_prefix="${source_path_prefix:-/sites/${current_domain}/}"
-    local default_source_webroot="${source_webroot:-files}"
+    local default_local_prefix="${local_path_prefix:-/sites/${current_domain}/}"
+    local default_local_webroot="${local_webroot:-files}"
     
-    read -p "$(echo -e "${COLOR_CYAN}Source path prefix${COLOR_RESET} [${default_source_prefix}]: ")" input_source_path_prefix
-    source_path_prefix="${input_source_path_prefix:-$default_source_prefix}"
+    read -p "$(echo -e "${COLOR_CYAN}Local path prefix${COLOR_RESET} [${default_local_prefix}]: ")" input_local_path_prefix
+    local_path_prefix="${input_local_path_prefix:-$default_local_prefix}"
     
-    read -p "$(echo -e "${COLOR_CYAN}Source webroot${COLOR_RESET} [${default_source_webroot}]: ")" input_source_webroot
-    source_webroot="${input_source_webroot:-$default_source_webroot}"
+    read -p "$(echo -e "${COLOR_CYAN}Local webroot${COLOR_RESET} [${default_local_webroot}]: ")" input_local_webroot
+    local_webroot="${input_local_webroot:-$default_local_webroot}"
     
     # REMOTE configuration
     print_step "REMOTE Configuration"
     
     # Extract source domain for remote default
-    local source_domain=$(extract_domain_from_path "$source_path_prefix")
-    local default_remote_prefix="${remote_path_prefix:-/sites/${source_domain}/}"
+    local local_domain=$(extract_domain_from_path "$local_path_prefix")
+    local default_remote_prefix="${remote_path_prefix:-/sites/${local_domain}/}"
     local default_remote_webroot="${remote_webroot:-files}"
     
     read -p "$(echo -e "${COLOR_CYAN}Remote IP address or hostname${COLOR_RESET} [${remote_ip_address}]: ")" input_remote_ip
@@ -956,15 +960,15 @@ rnd_str_key="38fh"
 
 # Set paths / prefixes
 db_export_prefix="wp_db_export_"
-source_path="${source_path_prefix}${source_webroot}"
+source_path="${local_path_prefix}${local_webroot}"
 remote_path="${remote_path_prefix}${remote_webroot}"
 source_db_name="${db_export_prefix}${rnd_str}${rnd_str_key}.sql"
 current_user=$(whoami)
 
 # Auto-detect local webroot: if wp-config.php not found at configured path, try files/public
-if [[ ! -f "${source_path}/wp-config.php" && -f "${source_path_prefix}files/public/wp-config.php" ]]; then
-    source_webroot="files/public"
-    source_path="${source_path_prefix}${source_webroot}"
+if [[ ! -f "${source_path}/wp-config.php" && -f "${local_path_prefix}files/public/wp-config.php" ]]; then
+    local_webroot="files/public"
+    source_path="${local_path_prefix}${local_webroot}"
     print_info "Auto-detected local webroot: ${source_path}"
 fi
 
